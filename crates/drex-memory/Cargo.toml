@@ -1,0 +1,31 @@
+[package]
+name = "drex-memory"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+uuid = { version = "1", features = ["v7", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+async-trait = { workspace = true }
+
+# Contextra dependencies
+memory = { path = "../../Contextra/libs/memory" }
+storage = { path = "../../Contextra/libs/storage" }
+embeddings = { path = "../../Contextra/libs/embeddings" }
+types = { path = "../../Contextra/libs/types" }
+errors = { path = "../../Contextra/libs/errors" }
+retrieval = { path = "../../Contextra/libs/retrieval" }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros"] }
+
+[lints]
+workspace = true

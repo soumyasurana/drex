@@ -1,0 +1,79 @@
+[workspace]
+resolver = "2"
+
+members = [
+    # Drex crates
+    "crates/drex-core",
+    "crates/drex-config",
+    "crates/drex-memory",
+
+    # Contextra libraries (needed for Drex integration)
+    "Contextra/libs/common",
+    "Contextra/libs/settings",
+    "Contextra/libs/telemetry",
+    "Contextra/libs/errors",
+    "Contextra/libs/types",
+    "Contextra/libs/auth",
+    "Contextra/libs/storage",
+    "Contextra/libs/providers",
+    "Contextra/libs/embeddings",
+    "Contextra/libs/retrieval",
+    "Contextra/libs/memory",
+    "Contextra/libs/context",
+    "Contextra/libs/prompts",
+    "Contextra/libs/ingestion",
+    "Contextra/libs/orchestration",
+    "Contextra/libs/evaluation",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["Soumya Surana"]
+repository = "https://github.com/soumyasurana/Drex"
+rust-version = "1.90"
+
+[workspace.dependencies]
+config = "0.15"
+dotenvy = "0.15"
+http = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+chrono = { version = "0.4", features = ["serde"] }
+rstest = "0.26"
+tempfile = "3"
+temp-env = "0.3"
+uuid = { version = "1", features = ["v7", "serde"] }
+
+# Async runtime
+sqlx = { version = "0.8", features = ["postgres", "runtime-tokio"] }
+redis = { version = "0.25", features = ["aio", "tokio-comp"] }
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Additional Contextra deps
+async-trait = "0.1"
+reqwest = { version = "0.12", features = ["json"] }
+axum = { version = "0.7", features = ["macros"] }
+uzun = "0.7"
+qdrant-client = "1.10"
+tower = { version = "0.4", features = ["full"] }
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+tokio-util = "0.7"
+futures = "0.3"
+futures-util = "0.3"
+sha2 = "0.10"
+base64 = "0.22"
+tonic = { version = "0.12", features = ["tls"] }
+tonic-build = "0.12"
+prost = "0.13"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"

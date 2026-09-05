@@ -1,0 +1,20 @@
+# Drex Default Configuration
+# This file is checked into git and contains no secrets.
+# Override these values via environment-specific files or environment variables.
+# 
+# This configuration aligns with Contextra's infrastructure expectations:
+# - PostgreSQL: postgres:postgrespassword@localhost:5432
+# - Redis: localhost:6379
+
+app_name = "drex"
+environment = "development"
+log_level = "info"
+
+[database]
+# Aligned with Contextra's docker-compose credentials for shared local development
+url = "postgres://postgres:postgrespassword@localhost:5432/drex"
+max_connections = 10
+
+[redis]
+# Standard Redis connection, aligned with Contextra's docker-compose
+url = "redis://localhost:6379"

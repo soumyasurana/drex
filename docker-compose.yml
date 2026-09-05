@@ -1,0 +1,83 @@
+# Drex Local Development Infrastructure
+# 
+# This compose file provides the minimal infrastructure required for local Drex development.
+# It aligns with Contextra's infrastructure requirements where applicable.
+#
+# Usage:
+#   docker compose up -d          # Start all services
+#   docker compose down           # Stop all services
+#   docker compose down -v        # Stop and remove data volumes
+#
+# Services:
+#   - PostgreSQL 16: Relational database for Drex state persistence
+#   - Redis 7: Caching and session storage
+#
+# Note: Qdrant is NOT included here because Drex delegates vector/embedding
+# operations to Contextra. Only start Qdrant if you're running Contextra
+# services alongside Drex.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: drex-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: drex
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    # Use below when you need to run Contextra alongside Drex
+    # networks:
+    #   - drex-contextra-shared
+
+  redis:
+    image: redis:7-alpine
+    container_name: drex-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    # Use below when you need to run Contextra alongside Drex
+    # networks:
+    #   - drex-contextra-shared
+
+  # Qdrant is commented out because Drex doesn't directly use vector storage.
+ # Contextra handles all embedding/vector operations via its own Qdrant instance.
+  # Uncomment if you need to run Contextra Gateway locally alongside Drex.
+  #
+  # qdrant:
+  #   image: qdrant/qdrant:v1.8.0
+  #   container_name: drex-qdrant
+  #   restart: unless-stopped
+  #   ports:
+  #     - "6333:6333"
+  #     - "6334:6334"
+  #   volumes:
+  #     - qdrant_data:/qdrant/storage
+  #   # networks:
+  #   #   - drex-contextra-shared
+
+volumes:
+  postgres_data:
+  redis_data:
+  # qdrant_data:
+
+# Uncomment to create a shared network with Contextra services
+# networks:
+#   drex-contextra-shared:
+#     name: drex-contextra-shared
+#     driver: bridge

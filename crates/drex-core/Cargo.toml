@@ -1,0 +1,25 @@
+[package]
+name = "drex-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "drex"
+path = "src/main.rs"
+
+[dependencies]
+drex-config = { path = "../drex-config" }
+
+# Async runtime and health checks
+sqlx.workspace = true
+redis.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,21 @@
+[package]
+name = "drex-config"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+config.workspace = true
+dotenvy.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+temp-env.workspace = true
