@@ -7,7 +7,7 @@ use drex_agent::{Agent, AgentConfig};
 use drex_core::{
     MemoryConfig, initialize_app_state,
     health_check::{check_memory, check_postgres, check_redis, HealthStatus},
-    security::{run_security_audit, SecuritySeverity},
+    security::SecuritySeverity,
 };
 use drex_config::AppConfig;
 use tracing::{error, info};
@@ -49,7 +49,7 @@ async fn main() {
 
     match cli.command {
         Commands::Health => run_health_check().await,
-        Commands::Security => run_security_audit().await,
+        Commands::Security => do_security_audit().await,
         Commands::Ask { request, trace, dry_run } => {
             run_ask(request.join(" "), trace, dry_run).await
         }
@@ -202,7 +202,7 @@ async fn run_ask(request: String, _trace: bool, dry_run: bool) {
     }
 }
 
-async fn run_security_audit() {
+async fn do_security_audit() {
     println!("Drex Security Audit");
     println!("==================");
     println!();

@@ -48,6 +48,7 @@ pub mod result;
 pub mod schema;
 pub mod tool;
 pub mod tools;
+pub mod trust;
 
 pub use capability::{Capability, CapabilitySet};
 pub use error::{ToolError, ToolResult};
@@ -55,3 +56,7 @@ pub use registry::{ToolRegistry, AuthorizedToolRegistry};
 pub use result::{ExecutionResult, ExecutionStatus};
 pub use schema::{JsonSchema, ToolSchema};
 pub use tool::{Tool, ToolContext, ToolInput, ToolMetadata};
+pub use trust::{
+    TrustSanitizer, TrustToken, TrustValidation, TrustValidationMethod, Trusted,
+    MAX_JSON_DEPTH, MAX_JSON_ELEMENTS, MAX_STRING_FIELD_SIZE, MAX_TOOL_OUTPUT_SIZE,
+};

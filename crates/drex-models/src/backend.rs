@@ -2,8 +2,9 @@
 
 use crate::error::ModelError;
 use crate::request::ModelRequest;
-use crate::response::ModelResponse;
+use crate::response::{ModelResponse, StreamChunk};
 use async_trait::async_trait;
+use futures::stream::BoxStream;
 
 /// Trait for model backends.
 ///
@@ -29,6 +30,43 @@ pub trait ModelBackend: Send + Sync {
     /// * `Ok(ModelResponse)` - The complete model response
     /// * `Err(ModelError)` - If the request fails
     async fn complete(&self, request: ModelRequest) -> Result<ModelResponse, ModelError>;
+
+    /// Stream a model response as incremental chunks.
+    ///
+    /// This method returns a stream of `StreamChunk` that can be consumed
+    /// incrementally. Not all backends support streaming natively;
+    /// implementations that don't support streaming should return an error.
+    ///
+    /// # Arguments
+    /// * `request` - The model request containing messages, tools, and parameters
+    ///
+    /// # Returns
+    /// * `Ok(BoxStream<StreamChunk>)` - A stream of response chunks
+    /// * `Err(ModelError)` - If streaming is not supported or the request fails
+    ///
+    /// # Cancellation
+    /// The stream should be cancellable by dropping it. Backends should
+    /// support cancellation to avoid wasting resources.
+    ///
+    /// # Default Implementation
+    /// Default implementation returns `Unsupported` error. Backends that
+    /// support streaming must override this method.
+    fn stream(
+        &self,
+        _request: ModelRequest,
+    ) -> Result<BoxStream<'static, StreamChunk>, ModelError> {
+        Err(ModelError::Unsupported(
+            "Streaming not implemented for this backend".to_string(),
+        ))
+    }
+
+    /// Check if this backend supports streaming.
+    ///
+    /// Default implementation returns false. Backends that support
+    /// streaming should override this.
+    fn supports_streaming(&self) -> bool {
+        false
+    }
 
     /// Check if this backend supports a specific capability.
     ///

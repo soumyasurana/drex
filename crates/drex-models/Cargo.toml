@@ -17,6 +17,9 @@ tokio.workspace = true
 # HTTP client
 reqwest.workspace = true
 
+# Streaming support
+futures.workspace = true
+
 # Serialization (for structured outputs)
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
