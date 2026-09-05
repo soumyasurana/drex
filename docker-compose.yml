@@ -64,15 +64,10 @@ services:
     container_name: drex-qdrant
     restart: unless-stopped
     ports:
-      - "6333:6333"    # HTTP API
-      - "6334:6334"    # gRPC API
+      - "6333:6333"
+      - "6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:6333/healthz || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
     networks:
       - drex-network
 
