@@ -1,0 +1,27 @@
+[package]
+name = "orchestration"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+async-trait = "0.1"
+context = { path = "../context" }
+embeddings = { path = "../embeddings" }
+errors = { path = "../errors" }
+ingestion = { path = "../ingestion" }
+memory = { path = "../memory" }
+prompts = { path = "../prompts" }
+providers = { path = "../providers" }
+retrieval = { path = "../retrieval" }
+serde_json = { workspace = true }
+storage = { path = "../storage" }
+tracing = "0.1"
+types = { path = "../types" }
+
+[dev-dependencies]
+futures-util = "0.3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+uuid = { workspace = true }
+
+[lints]
+workspace = true

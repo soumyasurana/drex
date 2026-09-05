@@ -1,0 +1,2 @@
+This is a plain text fixture.
+It has enough words to exercise parser and chunker behavior.

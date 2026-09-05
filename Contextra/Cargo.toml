@@ -1,0 +1,59 @@
+[workspace]
+resolver = "2"
+
+members = [
+    # Applications
+    "services/gateway",
+    "services/worker",
+    "services/cli",
+
+    # Libraries
+    "libs/common",
+    "libs/settings",
+    "libs/telemetry",
+    "libs/errors",
+    "libs/types",
+    "libs/auth",
+    "libs/storage",
+    "libs/providers",
+    "libs/embeddings",
+    "libs/retrieval",
+    "libs/memory",
+    "libs/context",
+    "libs/prompts",
+    "libs/ingestion",
+    "libs/orchestration",
+    "libs/evaluation",
+
+    # End-to-end Tests
+    "tests/e2e",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["Soumya Surana"]
+repository = "https://github.com/soumyasurana/Contextra"
+rust-version = "1.90"
+
+[workspace.dependencies]
+http = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+chrono = { version = "0.4", features = ["serde"] }
+dotenvy = "0.15"
+rstest = "0.26"
+tempfile = "3"
+uuid = { version = "1", features = ["v7", "serde"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+todo = "warn"
+dbg_macro = "warn"

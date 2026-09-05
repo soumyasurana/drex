@@ -1,0 +1,99 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: contextra-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: contextra
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: contextra-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  qdrant:
+    image: qdrant/qdrant:v1.8.0
+    container_name: contextra-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  gateway:
+    image: ghcr.io/soumyasurana/contextra-gateway:latest
+    container_name: contextra-gateway
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      CONTEXTRA_ENV: production
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 3000
+      DATABASE_URL: postgres://postgres:postgrespassword@postgres:5432/contextra
+      REDIS_URL: redis://redis:6379
+      QDRANT_URL: http://qdrant:6333
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+
+  worker:
+    image: ghcr.io/soumyasurana/contextra-worker:latest
+    container_name: contextra-worker
+    restart: unless-stopped
+    environment:
+      CONTEXTRA_ENV: production
+      DATABASE_URL: postgres://postgres:postgrespassword@postgres:5432/contextra
+      REDIS_URL: redis://redis:6379
+      QDRANT_URL: http://qdrant:6333
+      WORKER_CONCURRENCY: 4
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+
+  web:
+    image: ghcr.io/soumyasurana/contextra-web:latest
+    container_name: contextra-web
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_GATEWAY_URL: https://contextra.blocklogsecurity.com
+    depends_on:
+      gateway:
+        condition: service_started
+
+volumes:
+  postgres_data:
+  redis_data:
+  qdrant_data:

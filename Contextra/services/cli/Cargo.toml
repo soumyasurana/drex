@@ -1,0 +1,37 @@
+[package]
+name = "cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "contextra"
+path = "src/main.rs"
+
+[dependencies]
+async-trait = "0.1"
+clap = { version = "4", features = ["derive", "env"] }
+common = { path = "../../libs/common" }
+embeddings = { path = "../../libs/embeddings" }
+errors = { path = "../../libs/errors" }
+evaluation = { path = "../../libs/evaluation" }
+ingestion = { path = "../../libs/ingestion" }
+memory = { path = "../../libs/memory" }
+orchestration = { path = "../../libs/orchestration" }
+providers = { path = "../../libs/providers" }
+reqwest = { version = "0.12", features = ["json"] }
+retrieval = { path = "../../libs/retrieval" }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+storage = { path = "../../libs/storage" }
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+types = { path = "../../libs/types" }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,0 +1,18 @@
+[package]
+name = "auth"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+argon2 = "0.5"
+chrono = { workspace = true }
+errors = { path = "../errors" }
+jsonwebtoken = { version = "10", default-features = false, features = ["rust_crypto"] }
+serde = { workspace = true }
+storage = { path = "../storage" }
+types = { path = "../types" }
+uuid = { workspace = true }
+rand_core = { version = "0.6", features = ["getrandom"] }
+
+[lints]
+workspace = true

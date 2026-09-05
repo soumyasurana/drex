@@ -1,0 +1,33 @@
+[package]
+name = "gateway"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+async-trait = "0.1"
+auth = { path = "../../libs/auth" }
+axum = "0.7"
+common = { path = "../../libs/common" }
+context = { path = "../../libs/context" }
+dotenvy = "0.15"
+embeddings = { path = "../../libs/embeddings" }
+errors = { path = "../../libs/errors" }
+futures-util = "0.3"
+http = { workspace = true }
+ingestion = { path = "../../libs/ingestion" }
+memory = { path = "../../libs/memory" }
+orchestration = { path = "../../libs/orchestration" }
+providers = { path = "../../libs/providers" }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+settings = { path = "../../libs/settings" }
+storage = { path = "../../libs/storage" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace", "cors"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+types = { path = "../../libs/types" }
+utoipa = { version = "5", features = ["axum_extras", "uuid"] }
+utoipa-swagger-ui = { version = "8", features = ["axum"] }
+uuid = { workspace = true }

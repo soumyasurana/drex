@@ -1,0 +1,33 @@
+[package]
+name = "e2e-tests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+async-trait = "0.1"
+auth = { path = "../../libs/auth" }
+axum = "0.7"
+cli = { path = "../../services/cli" }
+common = { path = "../../libs/common" }
+embeddings = { path = "../../libs/embeddings" }
+errors = { path = "../../libs/errors" }
+evaluation = { path = "../../libs/evaluation" }
+gateway = { path = "../../services/gateway" }
+ingestion = { path = "../../libs/ingestion" }
+memory = { path = "../../libs/memory" }
+orchestration = { path = "../../libs/orchestration" }
+providers = { path = "../../libs/providers" }
+reqwest = { version = "0.12", features = ["json"] }
+retrieval = { path = "../../libs/retrieval" }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+storage = { path = "../../libs/storage" }
+tempfile = { workspace = true }
+tokio = { version = "1", features = ["full"] }
+types = { path = "../../libs/types" }
+uuid = { workspace = true }
+
+[lints]
+workspace = true

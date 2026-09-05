@@ -1,0 +1,57 @@
+
+# Rust
+/target/
+/debug/
+/release/
+
+**/*.rs.bk
+Roadmap.md
+
+# IDEs
+.vscode/
+.idea/
+
+# Vim
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Logs
+logs/
+*.log
+
+# Databases & Local Storage
+qdrant_data/
+postgres_data/
+redis_data/
+
+*.db
+*.sqlite
+*.sqlite3
+
+# Coverage & Profiling
+coverage/
+tarpaulin-report.html
+*.profraw
+*.profdata
+
+# Build Artifacts
+*.pdb
+
+# Temporary Files
+tmp/
+temp/
+.cache/
+
+# Docker
+docker-compose.override.yml
+
+# OS Files
+Thumbs.db

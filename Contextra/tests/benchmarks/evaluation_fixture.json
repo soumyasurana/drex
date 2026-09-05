@@ -1,0 +1,35 @@
+{
+  "retrieval": [
+    {
+      "query": "How are API keys authenticated?",
+      "expected_relevant_chunk_ids": ["chunk-auth", "chunk-storage"],
+      "retrieved_chunk_ids": ["chunk-auth", "chunk-api", "chunk-storage"]
+    },
+    {
+      "query": "Where is long-term memory stored?",
+      "expected_relevant_chunk_ids": ["chunk-memory"],
+      "retrieved_chunk_ids": ["chunk-retrieval", "chunk-memory"]
+    },
+    {
+      "query": "How does the context engine rank evidence?",
+      "expected_relevant_chunk_ids": ["chunk-context"],
+      "retrieved_chunk_ids": ["chunk-api", "chunk-storage", "chunk-prompts"]
+    }
+  ],
+  "generation": [
+    {
+      "query": "How are API keys authenticated?",
+      "answer": "API keys are hashed and verified before authorizing scoped access.",
+      "reference_answer": "API keys are hashed, verified, and checked against required scopes.",
+      "min_words": 6,
+      "max_words": 30
+    },
+    {
+      "query": "Where is long-term memory stored?",
+      "answer": "Long-term memory is stored in the vector-backed memory collection for later recall.",
+      "reference_answer": "Long-term memory is stored in a vector store collection and recalled by user and query.",
+      "min_words": 8,
+      "max_words": 35
+    }
+  ]
+}

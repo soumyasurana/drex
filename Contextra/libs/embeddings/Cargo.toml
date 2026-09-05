@@ -1,0 +1,23 @@
+[package]
+name = "embeddings"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+async-trait = "0.1"
+errors = { path = "../errors" }
+futures-util = "0.3"
+hex = "0.4"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+storage = { path = "../storage" }
+thiserror.workspace = true
+tokio = { version = "1", features = ["time"] }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }

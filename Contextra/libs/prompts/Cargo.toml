@@ -1,0 +1,21 @@
+[package]
+name = "prompts"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+errors = { path = "../errors" }
+handlebars = "6"
+memory = { path = "../memory" }
+providers = { path = "../providers" }
+retrieval = { path = "../retrieval" }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+types = { path = "../types" }
+uuid = { workspace = true }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tempfile = { workspace = true }

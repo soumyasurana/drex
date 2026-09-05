@@ -1,0 +1,22 @@
+[package]
+name = "memory"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+async-trait = "0.1"
+embeddings = { path = "../embeddings" }
+errors = { path = "../errors" }
+providers = { path = "../providers" }
+retrieval = { path = "../retrieval" }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+storage = { path = "../storage" }
+types = { path = "../types" }
+uuid = { workspace = true }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
