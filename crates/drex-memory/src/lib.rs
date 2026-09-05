@@ -21,6 +21,7 @@ mod query;
 mod store;
 
 pub mod contextra;
+pub mod policy;
 
 pub use memory::{
     Memory, MemoryId, MemoryKind, MemoryMetadata, MemoryPatch, MemorySource, SensitivityLevel,
@@ -28,6 +29,10 @@ pub use memory::{
 pub use query::MemoryQuery;
 pub use store::{MemoryStore, MemoryStoreError};
 pub use contextra::ContextraMemoryStore;
+pub use policy::{
+    Confidence, MemoryDecision, MemoryPolicy, PolicyContext, PolicyEnforcingStore, Provenance,
+    RuleBasedPolicy, TaskTrustLevel, Ttl,
+};
 
 #[cfg(test)]
 mod tests;

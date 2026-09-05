@@ -618,6 +618,14 @@ mod tests {
         ) -> Result<Vec<LongTermMemory>, ContextraError> {
             Ok(self.memories.iter().take(limit).cloned().collect())
         }
+
+        async fn forget(&self, _ids: &[Uuid]) -> Result<(), ContextraError> {
+            Ok(())
+        }
+
+        async fn update(&self, _memory: LongTermMemory) -> Result<(), ContextraError> {
+            Ok(())
+        }
     }
 
     #[derive(Debug, Clone)]
