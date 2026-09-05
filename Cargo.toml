@@ -10,6 +10,7 @@ members = [
     "crates/drex-tools",
     "crates/drex-agent",
     "crates/drex-voice",
+    "crates/drex-vision",
 
     # Contextra libraries (needed for Drex integration)
     "Contextra/libs/common",

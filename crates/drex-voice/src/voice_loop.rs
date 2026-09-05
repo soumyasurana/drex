@@ -1,20 +1,12 @@
 //! Voice Loop - Continuous voice interaction
-//!
-//! Implements the conversational voice loop:
-//! 1. Listen for user speech
-//! 2. Transcribe to text
-//! 3. Send to agent
-//! 4. Receive response
-//! 5. Speak response
-//! 6. Repeat (controlled by user saying "stop")
 
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 use crate::audio::AudioConfig;
-use crate::stt::{create_stt_engine, SpeechToText, SttConfig, SttEngine, TranscriptionResult};
-use crate::tts::{create_tts_engine, TextToSpeech, TtsConfig, TtsEngine};
+use crate::stt::{create_stt_engine, SpeechToText, SttConfig, SttError, SttEngine, TranscriptionResult};
+use crate::tts::{create_tts_engine, TextToSpeech, TtsConfig, TtsError, TtsEngine};
 
 /// Voice loop configuration.
 #[derive(Debug, Clone)]
@@ -54,11 +46,11 @@ impl Default for VoiceLoopConfig {
 pub enum VoiceLoopError {
     /// STT error.
     #[error("STT error: {0}")]
-    SttError(#[from] crate::stt::SttError),
+    SttError(#[from] SttError),
 
     /// TTS error.
     #[error("TTS error: {0}")]
-    TtsError(#[from] crate::tts::TtsError),
+    TtsError(#[from] TtsError),
 
     /// Audio error.
     #[error("Audio error: {0}")]
@@ -85,15 +77,15 @@ pub enum VoiceLoopError {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum VoiceSession {
     /// Waiting for activation phrase.
-    Waiting,
+    Waiting = 0,
     /// Listening for user input.
-    Listening,
+    Listening = 1,
     /// Processing the request.
-    Processing,
+    Processing = 2,
     /// Speaking the response.
-    Speaking,
+    Speaking = 3,
     /// Session ended.
-    Ended,
+    Ended = 4,
 }
 
 /// Events from the voice loop.
@@ -130,15 +122,13 @@ impl VoiceLoop {
     /// Create a new voice loop.
     pub fn new(config: VoiceLoopConfig) -> Result<Self, VoiceLoopError> {
         info!("Creating voice loop");
-
         let stt = create_stt_engine(config.stt_config.clone())?;
         let tts = create_tts_engine(config.tts_config.clone())?;
-
         Ok(Self {
             config,
             stt,
             tts,
-            state: std::sync::atomic::AtomicU8::new(VoiceSession::Waiting as u8),
+            state: std::sync::atomic::AtomicU8::new(0),
             event_tx: None,
         })
     }
@@ -196,21 +186,18 @@ impl VoiceLoop {
         Fut: std::future::Future<Output = Result<String, String>> + Send,
     {
         self.set_state(VoiceSession::Waiting);
-
         loop {
             match self.current_state() {
                 VoiceSession::Waiting => {
-                    // Wait for activation phrase
                     if let Err(e) = self.wait_for_activation().await {
                         self.emit(VoiceEvent::Error {
-                            message: format!("Activation failed: {}", e),
+                            message: format!("Activation failed: {:?}", e),
                         });
                         continue;
                     }
                     self.set_state(VoiceSession::Listening);
                 }
                 VoiceSession::Listening => {
-                    // Listen for user input
                     match self.listen_for_input().await {
                         Ok(transcription) => {
                             if transcription.stop_requested {
@@ -220,14 +207,11 @@ impl VoiceLoop {
                                 self.set_state(VoiceSession::Ended);
                                 break;
                             }
-
                             self.emit(VoiceEvent::Heard {
                                 text: transcription.text.clone(),
                                 confidence: transcription.confidence,
                             });
                             self.set_state(VoiceSession::Processing);
-
-                            // Process through callback
                             let response = match tokio::time::timeout(
                                 tokio::time::Duration::from_secs(self.config.response_timeout_secs),
                                 process_fn(transcription.text),
@@ -248,33 +232,25 @@ impl VoiceLoop {
                                     "Sorry, that took too long.".to_string()
                                 }
                             };
-
                             self.emit(VoiceEvent::Responded {
                                 text: response.clone(),
                             });
                             self.set_state(VoiceSession::Speaking);
-
-                            // Speak the response
                             self.speak(&response).await?;
-
-                            // Return to waiting
                             self.set_state(VoiceSession::Waiting);
                         }
                         Err(e) => {
                             self.emit(VoiceEvent::Error {
-                                message: format!("Listen failed: {}", e),
+                                message: format!("Listen failed: {:?}", e),
                             });
-                            // Return to waiting but emit error
                             self.set_state(VoiceSession::Waiting);
                         }
                     }
                 }
                 VoiceSession::Processing => {
-                    // Handled above, should not reach here
                     debug!("In processing state");
                 }
                 VoiceSession::Speaking => {
-                    // Handled above
                     debug!("In speaking state");
                 }
                 VoiceSession::Ended => {
@@ -282,21 +258,13 @@ impl VoiceLoop {
                 }
             }
         }
-
         Ok(())
     }
 
     /// Wait for activation phrase (simplified implementation).
     async fn wait_for_activation(&self) -> Result<(), VoiceLoopError> {
-        // In real implementation, would use VAD (Voice Activity Detection)
-        // and continuous listening for activation phrase
-        // For now, just simulate
-
         debug!("Waiting for activation phrase");
-
-        // Simulate waiting
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
         self.emit(VoiceEvent::Activated);
         Ok(())
     }
@@ -304,13 +272,8 @@ impl VoiceLoop {
     /// Listen for user input.
     async fn listen_for_input(&self) -> Result<TranscriptionResult, VoiceLoopError> {
         debug!("Listening for user input");
-
-        // Record for max duration or until silence
         let duration_ms = self.config.stt_config.max_duration_secs * 1000;
-
-        // Transcribe from microphone
         let result = self.stt.transcribe_from_mic(duration_ms).await?;
-
         Ok(result)
     }
 
@@ -319,13 +282,10 @@ impl VoiceLoop {
         if text.is_empty() {
             return Ok(());
         }
-
         debug!("Speaking: '{}'", text.chars().take(50).collect::<String>());
-
         self.emit(VoiceEvent::SpeakingStarted);
         self.tts.speak(text).await?;
         self.emit(VoiceEvent::SpeakingEnded);
-
         Ok(())
     }
 
@@ -358,20 +318,9 @@ mod tests {
         let config = VoiceLoopConfig::default();
         let (tx, mut rx) = mpsc::channel(10);
         let loop_ = VoiceLoop::with_events(config, tx).unwrap();
-
         assert_eq!(loop_.current_state(), VoiceSession::Waiting);
-
-        // Run a simple test where we provide input manually
-        let process_fn = |input: String| async move {
-            Ok(format!("You said: {}", input))
-        };
-
-        // Can't easily test run() without actual audio hardware
-        // but we can test state transitions
         loop_.set_state(VoiceSession::Listening);
         assert_eq!(loop_.current_state(), VoiceSession::Listening);
-
-        // Check event was emitted
         let event = rx.try_recv().unwrap();
         match event {
             VoiceEvent::StateChanged { from, to } => {

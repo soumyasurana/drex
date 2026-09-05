@@ -1,4 +1,5 @@
 mod health_check;
+mod security;
 mod state;
 
 use clap::{Parser, Subcommand};
@@ -6,6 +7,7 @@ use drex_agent::{Agent, AgentConfig};
 use drex_core::{
     MemoryConfig, initialize_app_state,
     health_check::{check_memory, check_postgres, check_redis, HealthStatus},
+    security::{run_security_audit, SecuritySeverity},
 };
 use drex_config::AppConfig;
 use tracing::{error, info};
@@ -24,6 +26,8 @@ struct Cli {
 enum Commands {
     /// Run health checks on all subsystems
     Health,
+    /// Run security audit
+    Security,
     /// Ask Drex to perform a task
     Ask {
         /// The request to send to Drex
@@ -45,6 +49,7 @@ async fn main() {
 
     match cli.command {
         Commands::Health => run_health_check().await,
+        Commands::Security => run_security_audit().await,
         Commands::Ask { request, trace, dry_run } => {
             run_ask(request.join(" "), trace, dry_run).await
         }
@@ -197,6 +202,63 @@ async fn run_ask(request: String, _trace: bool, dry_run: bool) {
     }
 }
 
+async fn run_security_audit() {
+    println!("Drex Security Audit");
+    println!("==================");
+    println!();
+
+    let summary = drex_core::security::run_security_audit().await;
+
+    println!("Audit completed at: {:?}", summary.timestamp);
+    println!();
+
+    for (audit_name, result) in &summary.results {
+        println!("{}:", audit_name);
+        println!("  Status: {}", if result.passed { "PASS" } else { "FAIL" });
+        println!("  Findings: {}", result.findings.len());
+        if !result.findings.is_empty() {
+            println!("  Details:");
+            for finding in &result.findings {
+                println!("    - [{}] {}: {}",
+                    format_severity(finding.severity),
+                    finding.category,
+                    finding.description
+                );
+                println!("      Recommendation: {}", finding.recommendation);
+            }
+        }
+        println!();
+    }
+
+    println!("Summary:");
+    println!("  Total findings: {}", summary.total_findings);
+
+    if summary.critical_count > 0 {
+        println!("  Critical: {} ⚠️", summary.critical_count);
+    }
+    if summary.high_count > 0 {
+        println!("  High: {} ⚠️", summary.high_count);
+    }
+
+    if summary.all_passed {
+        println!("\n✅ All security audits passed!");
+        std::process::exit(0);
+    } else {
+        println!("\n⚠️ Some security audits failed. Review findings above.");
+        std::process::exit(1);
+    }
+}
+
+fn format_severity(severity: SecuritySeverity) -> &'static str {
+    match severity {
+        SecuritySeverity::Critical => "CRIT",
+        SecuritySeverity::High => "HIGH",
+        SecuritySeverity::Medium => "MED",
+        SecuritySeverity::Low => "LOW",
+        SecuritySeverity::Info => "INFO",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -231,6 +293,15 @@ mod tests {
         match cli.command {
             Commands::Health => {}
             _ => panic!("Expected Health command"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_security_command() {
+        let cli = Cli::parse_from(["drex", "security"]);
+        match cli.command {
+            Commands::Security => {}
+            _ => panic!("Expected Security command"),
         }
     }
 }

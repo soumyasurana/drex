@@ -1,12 +1,8 @@
 //! Speech-to-Text - Whisper-based local STT
-//!
-//! Uses whisper-rs for local, offline speech recognition.
-//! All processing happens on-device for maximum privacy.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 use crate::audio::{AudioBuffer, AudioCapture, AudioConfig};
 
@@ -103,37 +99,18 @@ pub trait SpeechToText: Send + Sync {
     fn supported_languages(&self) -> Vec<String>;
 }
 
-/// Whisper-based STT engine.
-pub struct WhisperEngine {
+/// Placeholder STT engine.
+pub struct PlaceholderSttEngine {
     config: SttConfig,
-    // In real implementation, would hold whisper_rs::WhisperContext
-    _placeholder: (),
 }
 
-impl WhisperEngine {
-    /// Create a new Whisper engine.
+impl PlaceholderSttEngine {
+    /// Create a new placeholder engine.
     pub fn new(config: SttConfig) -> Result<Self, SttError> {
-        // In real implementation, would load whisper model here
-        // let model_path = config.model_path.as_ref()
-        //     .ok_or_else(|| SttError::ModelNotFound("No model path configured".to_string()))?;
-        // let ctx = whisper_rs::WhisperContext::new(model_path, ...)?;
-
-        info!("Creating Whisper STT engine");
-
-        Ok(Self {
-            config,
-            _placeholder: (),
-        })
+        info!("Creating placeholder STT engine");
+        Ok(Self { config })
     }
 
-    /// Download a model if not present.
-    pub async fn download_model(&self, _model_name: &str) -> Result<PathBuf, SttError> {
-        // In real implementation, would download from huggingface or similar
-        warn!("Model download not yet implemented");
-        Err(SttError::ModelNotFound("Model download not implemented".to_string()))
-    }
-
-    /// Check if a stop phrase was said.
     fn check_stop_phrase(&self, text: &str) -> bool {
         let stop_phrases = ["stop", "quit", "exit", "goodbye", "that's all"];
         let lower = text.to_lowercase();
@@ -142,26 +119,16 @@ impl WhisperEngine {
 }
 
 #[async_trait::async_trait]
-impl SpeechToText for WhisperEngine {
+impl SpeechToText for PlaceholderSttEngine {
     async fn transcribe(&self, audio: &AudioBuffer) -> Result<TranscriptionResult, SttError> {
         let start = std::time::Instant::now();
-
-        // In real implementation, would:
-        // 1. Convert audio to 16kHz mono f32 if needed
-        // 2. Run whisper inference
-        // 3. Return result with confidence
-
         debug!("Transcribing {} audio samples", audio.len());
-
-        // Placeholder implementation
-        let text = "This is a placeholder transcription".to_string();
+        let text = "Placeholder transcription - STT not fully implemented yet".to_string();
         let duration_ms = start.elapsed().as_millis() as u64;
-
         let stop_requested = self.check_stop_phrase(&text);
-
         Ok(TranscriptionResult {
             text,
-            confidence: 0.95,
+            confidence: 0.0,
             language: Some(self.config.language.clone()),
             duration_ms,
             stop_requested,
@@ -169,48 +136,29 @@ impl SpeechToText for WhisperEngine {
     }
 
     async fn transcribe_from_mic(&self, duration_ms: u64) -> Result<TranscriptionResult, SttError> {
-        // Check duration limit
         if duration_ms > self.config.max_duration_secs * 1000 {
             return Err(SttError::AudioTooLong(duration_ms / 1000, self.config.max_duration_secs));
         }
-
-        // Capture audio
         let capture = AudioCapture::new(AudioConfig::default());
         let audio = capture.record_duration(duration_ms).await?;
-
-        // Transcribe
         self.transcribe(&audio).await
     }
 
     fn is_ready(&self) -> bool {
-        // In real implementation, check if model is loaded
-        true
+        false
     }
 
     fn supported_languages(&self) -> Vec<String> {
-        // Whisper supports 99 languages
-        vec![
-            "auto".to_string(),
-            "en".to_string(),
-            "es".to_string(),
-            "fr".to_string(),
-            "de".to_string(),
-            "it".to_string(),
-            "pt".to_string(),
-            "ru".to_string(),
-            "zh".to_string(),
-            "ja".to_string(),
-            "ko".to_string(),
-        ]
+        vec!["en".to_string()]
     }
 }
 
-/// Convenience type alias for the STT engine.
+/// Type alias for the STT engine.
 pub type SttEngine = Arc<dyn SpeechToText>;
 
-/// Create a default STT engine.
+/// Create a default STT engine (placeholder).
 pub fn create_stt_engine(config: SttConfig) -> Result<SttEngine, SttError> {
-    let engine = WhisperEngine::new(config)?;
+    let engine = PlaceholderSttEngine::new(config)?;
     Ok(Arc::new(engine))
 }
 
@@ -226,54 +174,35 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_whisper_transcribe() {
+    async fn test_placeholder_transcribe() {
         let config = SttConfig::default();
-        let engine = WhisperEngine::new(config).unwrap();
-
-        let audio = vec![0.0; 16000]; // 1 second of silence
+        let engine = PlaceholderSttEngine::new(config).unwrap();
+        let audio = vec![0.0; 16000];
         let result = engine.transcribe(&audio).await.unwrap();
-
         assert!(!result.text.is_empty());
-        assert!(result.confidence > 0.0);
-    }
-
-    #[tokio::test]
-    async fn test_whisper_transcribe_from_mic() {
-        let config = SttConfig::default();
-        let engine = WhisperEngine::new(config).unwrap();
-
-        let result = engine.transcribe_from_mic(100).await.unwrap();
-
-        assert!(!result.text.is_empty());
+        assert!(!result.stop_requested);
     }
 
     #[tokio::test]
     async fn test_stop_phrase_detection() {
         let config = SttConfig::default();
-        let engine = WhisperEngine::new(config).unwrap();
-
-        // Create audio that will generate a stop phrase
-        let audio = vec![0.0; 16000];
-        let mut result = engine.transcribe(&audio).await.unwrap();
-        result.text = "Please stop listening".to_string();
-
-        assert!(engine.check_stop_phrase(&result.text));
+        let engine = PlaceholderSttEngine::new(config).unwrap();
+        assert!(engine.check_stop_phrase("Please stop listening"));
+        assert!(!engine.check_stop_phrase("Continue please"));
     }
 
     #[test]
     fn test_supported_languages() {
         let config = SttConfig::default();
-        let engine = WhisperEngine::new(config).unwrap();
-
+        let engine = PlaceholderSttEngine::new(config).unwrap();
         let langs = engine.supported_languages();
-        assert!(langs.contains(&"en".to_string()));
-        assert!(langs.contains(&"auto".to_string()));
+        assert_eq!(langs, vec!["en"]);
     }
 
     #[test]
     fn test_create_stt_engine() {
         let config = SttConfig::default();
         let engine = create_stt_engine(config).unwrap();
-        assert!(engine.is_ready());
+        assert!(!engine.is_ready());
     }
 }

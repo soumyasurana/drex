@@ -1,0 +1,40 @@
+[package]
+name = "drex-vision"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+drex-core = { path = "../drex-core" }
+drex-config = { path = "../drex-config" }
+drex-agent = { path = "../drex-agent" }
+
+# Async runtime
+async-trait.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+
+# Image processing
+image = { version = "0.25", optional = true }
+
+# Screen capture
+# Using screenshots or xcap for cross-platform screen capture
+# These require system dependencies so make them optional
+screenshots = { version = "0.8", optional = true }
+xcap = { version = "0.4", optional = true }
+
+[features]
+default = []
+# Full vision support requires system dependencies
+vision = ["image", "screenshots", "xcap"]
+
+[lints]
+workspace = true

@@ -10,32 +10,35 @@ rust-version.workspace = true
 [dependencies]
 drex-core = { path = "../drex-core" }
 drex-config = { path = "../drex-config" }
+drex-agent = { path = "../drex-agent" }
 
 # Async runtime
 async-trait.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+thiserror.workspace = true
 
 # Serialization
 serde.workspace = true
 serde_json.workspace = true
 
-# Audio processing
-cpal = "0.15"
-hound = "3.5"
+# Audio processing (optional - requires ALSA on Linux)
+# cpal = { version = "0.15", optional = true }
+# hound = { version = "3.5", optional = true }
 
 # Speech-to-text - using whisper-rs for local execution
-# This runs entirely on-device
-whisper-rs = { version = "0.10", optional = true }
+# Requires downloading Whisper model files
+# whisper-rs = { version = "0.10", optional = true }
 
-# Text-to-speech - using tts crate (renamed to avoid conflict)
+# Text-to-speech - using tts crate (renamed to avoid feature name conflict)
 # Supports local synthesis engines
-tts-rs = { version = "0.26", optional = true, package = "tts" }
+# tts-rs = { version = "0.26", optional = true, package = "tts" }
 
 [features]
-default = ["stt", "tts"]
-stt = ["whisper-rs"]
-tts = ["dep:tts-rs"]
+default = []
+# audio = ["cpal", "hound"]
+# stt = ["whisper-rs", "audio"]
+# tts = ["dep:tts-rs", "audio"]
 
 [lints]
 workspace = true
