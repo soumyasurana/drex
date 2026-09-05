@@ -21,6 +21,30 @@ pub struct AppConfig {
     pub database: DatabaseConfig,
     pub redis: RedisConfig,
     pub ollama: OllamaConfig,
+    /// Contextra memory/context gateway configuration
+    pub contextra: ContextraConfig,
+    /// Qdrant vector database configuration (for semantic memory)
+    pub qdrant: QdrantConfig,
+}
+
+/// Contextra gateway configuration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ContextraConfig {
+    /// Gateway API URL (e.g., http://localhost:3000)
+    pub gateway_url: String,
+    /// API key for authentication (if required)
+    pub api_key: Option<String>,
+    /// Request timeout in seconds
+    pub timeout_seconds: u64,
+}
+
+/// Qdrant vector database configuration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct QdrantConfig {
+    /// Qdrant server URL (e.g., http://localhost:6333)
+    pub url: String,
+    /// API key for authentication (if required)
+    pub api_key: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -87,6 +111,15 @@ impl Default for AppConfig {
                 base_url: "http://localhost:11434".to_string(),
                 default_model: "gemma3:4b".to_string(),
                 timeout_seconds: 120,
+            },
+            contextra: ContextraConfig {
+                gateway_url: "http://localhost:3000".to_string(),
+                api_key: None,
+                timeout_seconds: 30,
+            },
+            qdrant: QdrantConfig {
+                url: "http://localhost:6333".to_string(),
+                api_key: None,
             },
         }
     }
@@ -205,6 +238,18 @@ impl AppConfig {
             )));
         }
 
+        if self.contextra.gateway_url.is_empty() {
+            return Err(ConfigErrorKind::Validation(String::from(
+                "contextra.gateway_url cannot be empty",
+            )));
+        }
+
+        if self.qdrant.url.is_empty() {
+            return Err(ConfigErrorKind::Validation(String::from(
+                "qdrant.url cannot be empty",
+            )));
+        }
+
         Ok(())
     }
 
@@ -288,6 +333,15 @@ url = "redis://localhost:6379"
 base_url = "http://localhost:11434"
 default_model = "gemma3:4b"
 timeout_seconds = 120
+
+[contextra]
+gateway_url = "http://localhost:3000"
+api_key = ""
+timeout_seconds = 30
+
+[qdrant]
+url = "http://localhost:6333"
+api_key = ""
 "#;
                 create_test_config(&temp_dir, "default", default_toml);
 
@@ -370,6 +424,15 @@ url = "redis://localhost:6379"
 base_url = "http://localhost:11434"
 default_model = "gemma3:4b"
 timeout_seconds = 120
+
+[contextra]
+gateway_url = "http://localhost:3000"
+api_key = ""
+timeout_seconds = 30
+
+[qdrant]
+url = "http://localhost:6333"
+api_key = ""
 "#;
         create_test_config(&temp_dir, "default", default_toml);
 
@@ -399,6 +462,15 @@ url = "redis://localhost:6379"
 base_url = "http://localhost:11434"
 default_model = "gemma3:4b"
 timeout_seconds = 120
+
+[contextra]
+gateway_url = "http://localhost:3000"
+api_key = ""
+timeout_seconds = 30
+
+[qdrant]
+url = "http://localhost:6333"
+api_key = ""
 "#;
         create_test_config(&temp_dir, "default", default_toml);
 

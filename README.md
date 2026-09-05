@@ -41,7 +41,7 @@ Drex is designed as three integrated layers:
 
 - **Voice**: Architecture ready, audio dependencies require system libraries (disabled by default)
 - **Vision**: Architecture ready, requires system image libraries (disabled by default)
-- **Contextra**: Present as submodule - requires separate setup and infrastructure
+- **Contextra Worker**: Optional background job processor (Gateway handles basic tasks)
 
 ### 📝 Not Yet Implemented
 
@@ -114,9 +114,82 @@ Drex is designed as three integrated layers:
 
 ### Required Services
 
-- **PostgreSQL 16+**: State persistence
-- **Redis 7+**: Caching and session storage
-- **Ollama**: Local LLM inference (see setup below)
+| Service | Purpose | Default Port | Required |
+|---------|---------|--------------|----------|
+| **PostgreSQL 16+** | State persistence | 5432 | Yes |
+| **Redis 7+** | Caching, sessions, pub/sub | 6379 | Yes |
+| **Qdrant** | Vector database for semantic memory | 6333 | Yes |
+| **Contextra** | Memory/context gateway | 3000 | Yes |
+| **Ollama** | Local LLM inference | 11434 | Yes |
+
+---
+
+## Contextra Setup
+
+**Contextra is required for persistent memory.** Drex cannot function without it.
+
+Contextra is a context engineering platform located in the `Contextra/` subdirectory. It provides:
+- Persistent memory storage (PostgreSQL + Qdrant)
+- Semantic search and retrieval
+- Conversation history
+- Context assembly
+
+### Option 1: Quick Setup (Recommended for Development)
+
+```bash
+# 1. Start infrastructure (PostgreSQL, Redis, Qdrant)
+docker compose up -d
+
+# 2. Build Contextra (first time only, takes ~5-10 minutes)
+cd Contextra
+cargo build --release -p gateway
+
+# 3. Start Contextra Gateway (in a separate terminal)
+cd Contextra
+# Terminal 2:
+DATABASE_URL=postgres://postgres:postgrespassword@localhost:5432/drex \
+REDIS_URL=redis://localhost:6379 \
+QDRANT_URL=http://localhost:6333 \
+RUST_LOG=info \
+cargo run --release -p gateway
+
+# Gateway will be available at http://localhost:3000
+```
+
+### Option 2: Build Docker Image
+
+```bash
+cd Contextra
+docker build -f deployments/docker/Dockerfile.gateway -t contextra-gateway .
+
+# Then modify docker-compose.yml to use:
+#   contextra-gateway:
+#     image: contextra-gateway:latest
+```
+
+### Option 3: Use Contextra's Docker Compose
+
+```bash
+cd Contextra
+# This starts postgres, redis, qdrant, gateway, and worker
+docker compose -f deployments/docker/docker-compose.yml up -d
+
+# Note: This may conflict with Drex's docker-compose on port conflicts.
+# Use Option 1 if you want Drex and Contextra on the same infrastructure.
+```
+
+### Verify Contextra is Running
+
+```bash
+# Check health
+curl http://localhost:3000/health
+
+# Should return: {"status":"healthy"}
+
+# Or build the Contextra CLI and test:
+cd Contextra
+cargo run --bin contextra -- collections list
+```
 
 ---
 
@@ -129,17 +202,48 @@ git clone <repository-url>
 cd DREX
 ```
 
-### 2. Start Infrastructure
+### 2. Start Infrastructure (Docker)
 
 ```bash
-# Start PostgreSQL and Redis (uses Docker Compose)
+# Start PostgreSQL, Redis, and Qdrant
 docker compose up -d
 
 # Verify services are running
 docker ps
+
+# Expected output:
+# drex-postgres   Up 5 seconds
+# drex-redis      Up 5 seconds  
+# drex-qdrant     Up 5 seconds
 ```
 
-### 3. Install Ollama
+### 3. Start Contextra (Required for Memory)
+
+In a **separate terminal**:
+
+```bash
+cd Contextra
+
+# Set environment variables
+export DATABASE_URL=postgres://postgres:postgrespassword@localhost:5432/drex
+export REDIS_URL=redis://localhost:6379
+export QDRANT_URL=http://localhost:6333
+
+# Build (first time only, ~5-10 minutes)
+cargo build --release -p gateway
+
+# Start the gateway
+cargo run --release -p gateway
+```
+
+Verify Contextra is running:
+```bash
+# In another terminal:
+curl http://localhost:3000/health
+# Should return: {"status":"healthy"}
+```
+
+### 4. Install Ollama
 
 ```bash
 # Install Ollama (Linux/macOS)
@@ -152,17 +256,17 @@ ollama pull gemma3:4b
 ollama list
 ```
 
-### 4. Configure Drex
+### 5. Configure Drex
 
 ```bash
 # Copy example environment file
 cp .env.example .env
 
-# Edit .env if needed (defaults should work with Docker)
+# The defaults should work. Only edit if you changed ports.
 # nano .env
 ```
 
-### 5. Build Drex
+### 6. Build Drex
 
 ```bash
 # Build the entire workspace (first build takes several minutes)
@@ -172,7 +276,7 @@ cargo build --release
 cargo build
 ```
 
-### 6. Verify Health
+### 7. Verify Health
 
 ```bash
 # Run health check (must have infrastructure running)
@@ -257,6 +361,89 @@ drex ask "Fetch https://example.com and summarize the content"
 
 # 4. Combined workflow
 drex ask "Clone https://github.com/user/repo to /tmp/test-repo and check its structure"
+```
+
+---
+
+## Drex Alive Test
+
+**This is the critical test that proves Drex is fully operational.**
+
+After starting all services (infrastructure, Contextra, Ollama), run:
+
+```bash
+# Test memory storage and retrieval
+cargo run --bin drex -- ask "Remember that Drex is my personal AI operating system"
+
+# Verify retrieval
+cargo run --bin drex -- ask "What project am I working on?"
+
+# You should see:
+# 1. Agent receives the request
+# 2. Context is retrieved from memory
+# 3. Ollama generates a response
+# 4. Response mentions "Drex" and "personal AI operating system"
+```
+
+**What this proves:**
+- ✅ Drex can receive user requests
+- ✅ Contextra memory is working (store/retrieve)
+- ✅ Ollama model is responding
+- ✅ Agent loop is functional
+
+---
+
+## Voice & Vision Roadmap
+
+Voice and Vision crates are **architecturally complete** but require additional implementation:
+
+### Voice (`drex-voice`)
+
+**Architecture:**
+```
+Microphone → Audio Capture → VAD (optional) → STT (Whisper) → Text
+                                                                ↓
+Speaker ← Audio Playback ← TTS ← Agent Response ← Audio Synthesis
+```
+
+**Next Steps:**
+1. **System Dependencies**: Install ALSA (Linux), CoreAudio (macOS), or WASAPI (Windows)
+2. **STT**: Integrate `whisper-rs` crate with local Whisper model
+3. **TTS**: Integrate `tts` crate or Piper TTS
+4. **Voice Loop**: The voice loop implementation exists but needs audio backends
+
+**To enable:**
+```bash
+# Install system dependencies (Ubuntu/Debian)
+sudo apt-get install libasound2-dev pkg-config
+
+# Then uncomment audio dependencies in drex-voice/Cargo.toml
+# Build with: cargo build --features voice
+```
+
+### Vision (`drex-vision`)
+
+**Architecture:**
+```
+Screenshot/Image → Preprocessing → Vision Model → Context → Agent → Response
+                                      ↓
+                               Computer Control (optional)
+```
+
+**Next Steps:**
+1. **Screenshots**: Integrate `screenshots` or `xcap` crate for cross-platform capture
+2. **Vision Model**: Add vision-capable model support (GPT-4V, Claude, or local Llava)
+3. **Computer Control**: Implement platform-specific control (X11, Win32, CoreGraphics)
+
+**To enable:**
+```bash
+# Install system dependencies
+# Linux: sudo apt-get install libx11-dev libxcb1-dev
+# macOS: No additional deps (CoreGraphics built-in)
+# Windows: No additional deps (Win32 built-in)
+
+# Then uncomment vision dependencies in drex-vision/Cargo.toml
+# Build with: cargo build --features vision
 ```
 
 ---

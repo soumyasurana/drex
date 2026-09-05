@@ -24,3 +24,16 @@ url = "redis://localhost:6379"
 base_url = "http://localhost:11434"
 default_model = "gemma3:4b"
 timeout_seconds = 120
+
+[contextra]
+# Contextra memory gateway configuration
+# The Contextra Gateway provides persistent memory and context services
+gateway_url = "http://localhost:3000"
+api_key = ""
+timeout_seconds = 30
+
+[qdrant]
+# Qdrant vector database configuration
+# Used directly by Drex for semantic memory when Contextra is not available
+url = "http://localhost:6333"
+api_key = ""
