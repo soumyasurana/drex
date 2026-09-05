@@ -1,0 +1,41 @@
+[package]
+name = "drex-voice"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+drex-core = { path = "../drex-core" }
+drex-config = { path = "../drex-config" }
+
+# Async runtime
+async-trait.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+
+# Audio processing
+cpal = "0.15"
+hound = "3.5"
+
+# Speech-to-text - using whisper-rs for local execution
+# This runs entirely on-device
+whisper-rs = { version = "0.10", optional = true }
+
+# Text-to-speech - using tts crate (renamed to avoid conflict)
+# Supports local synthesis engines
+tts-rs = { version = "0.26", optional = true, package = "tts" }
+
+[features]
+default = ["stt", "tts"]
+stt = ["whisper-rs"]
+tts = ["dep:tts-rs"]
+
+[lints]
+workspace = true

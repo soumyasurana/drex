@@ -12,14 +12,30 @@ name = "drex"
 path = "src/main.rs"
 
 [dependencies]
+drex-agent = { path = "../drex-agent" }
 drex-config = { path = "../drex-config" }
+drex-memory = { path = "../drex-memory" }
+drex-models = { path = "../drex-models" }
+drex-tools = { path = "../drex-tools" }
+
+# Contextra dependencies for memory backend
+memory = { path = "../../Contextra/libs/memory" }
+storage = { path = "../../Contextra/libs/storage" }
+embeddings = { path = "../../Contextra/libs/embeddings" }
+types = { path = "../../Contextra/libs/types" }
 
 # Async runtime and health checks
+async-trait.workspace = true
 sqlx.workspace = true
 redis.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+
+# CLI parsing
+clap = { version = "4.5", features = ["derive"] }
+serde.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true

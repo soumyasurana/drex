@@ -20,6 +20,7 @@ pub struct AppConfig {
     pub log_level: String,
     pub database: DatabaseConfig,
     pub redis: RedisConfig,
+    pub ollama: OllamaConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -31,6 +32,29 @@ pub struct DatabaseConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RedisConfig {
     pub url: String,
+}
+
+/// Ollama backend configuration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OllamaConfig {
+    /// Base URL for the Ollama server.
+    pub base_url: String,
+    /// Default model to use.
+    pub default_model: String,
+    /// Request timeout in seconds.
+    pub timeout_seconds: u64,
+}
+
+impl OllamaConfig {
+    /// Get the full generate API URL.
+    pub fn generate_url(&self) -> String {
+        format!("{}/api/generate", self.base_url.trim_end_matches('/'))
+    }
+
+    /// Get the chat API URL.
+    pub fn chat_url(&self) -> String {
+        format!("{}/api/chat", self.base_url.trim_end_matches('/'))
+    }
 }
 
 /// Errors that can occur during configuration loading.
@@ -58,6 +82,11 @@ impl Default for AppConfig {
             },
             redis: RedisConfig {
                 url: "redis://localhost:6379".to_string(),
+            },
+            ollama: OllamaConfig {
+                base_url: "http://localhost:11434".to_string(),
+                default_model: "gemma3:4b".to_string(),
+                timeout_seconds: 120,
             },
         }
     }
@@ -158,6 +187,24 @@ impl AppConfig {
             )));
         }
 
+        if self.ollama.base_url.is_empty() {
+            return Err(ConfigErrorKind::Validation(String::from(
+                "ollama.base_url cannot be empty",
+            )));
+        }
+
+        if self.ollama.default_model.is_empty() {
+            return Err(ConfigErrorKind::Validation(String::from(
+                "ollama.default_model cannot be empty",
+            )));
+        }
+
+        if self.ollama.timeout_seconds == 0 {
+            return Err(ConfigErrorKind::Validation(String::from(
+                "ollama.timeout_seconds must be greater than 0",
+            )));
+        }
+
         Ok(())
     }
 
@@ -236,6 +283,11 @@ max_connections = 5
 
 [redis]
 url = "redis://localhost:6379"
+
+[ollama]
+base_url = "http://localhost:11434"
+default_model = "gemma3:4b"
+timeout_seconds = 120
 "#;
                 create_test_config(&temp_dir, "default", default_toml);
 
@@ -247,6 +299,9 @@ url = "redis://localhost:6379"
                 assert_eq!(config.database.url, "postgres://test@localhost/drex");
                 assert_eq!(config.database.max_connections, 5);
                 assert_eq!(config.redis.url, "redis://localhost:6379");
+                assert_eq!(config.ollama.base_url, "http://localhost:11434");
+                assert_eq!(config.ollama.default_model, "gemma3:4b");
+                assert_eq!(config.ollama.timeout_seconds, 120);
             },
         );
     }
@@ -310,6 +365,11 @@ max_connections = 10
 
 [redis]
 url = "redis://localhost:6379"
+
+[ollama]
+base_url = "http://localhost:11434"
+default_model = "gemma3:4b"
+timeout_seconds = 120
 "#;
         create_test_config(&temp_dir, "default", default_toml);
 
@@ -334,6 +394,11 @@ max_connections = 10
 
 [redis]
 url = "redis://localhost:6379"
+
+[ollama]
+base_url = "http://localhost:11434"
+default_model = "gemma3:4b"
+timeout_seconds = 120
 "#;
         create_test_config(&temp_dir, "default", default_toml);
 

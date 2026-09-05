@@ -18,3 +18,9 @@ max_connections = 10
 [redis]
 # Standard Redis connection, aligned with Contextra's docker-compose
 url = "redis://localhost:6379"
+
+[ollama]
+# Ollama local LLM server configuration
+base_url = "http://localhost:11434"
+default_model = "gemma3:4b"
+timeout_seconds = 120

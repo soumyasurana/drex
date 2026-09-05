@@ -1,0 +1,43 @@
+[package]
+name = "drex-agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+description = "Drex agent - planning and execution orchestration"
+
+[dependencies]
+# Core async runtime
+async-trait.workspace = true
+tokio.workspace = true
+
+# Serialization
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+
+# Error handling
+thiserror.workspace = true
+
+# Utility
+chrono = { workspace = true, features = ["serde"] }
+uuid = { workspace = true, features = ["v7", "serde"] }
+tracing.workspace = true
+regex.workspace = true
+
+# Drex dependencies
+drex-config = { path = "../drex-config" }
+drex-models = { path = "../drex-models" }
+drex-tools = { path = "../drex-tools" }
+drex-memory = { path = "../drex-memory" }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros"] }
+serde_json.workspace = true
+rstest.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

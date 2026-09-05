@@ -6,6 +6,10 @@ members = [
     "crates/drex-core",
     "crates/drex-config",
     "crates/drex-memory",
+    "crates/drex-models",
+    "crates/drex-tools",
+    "crates/drex-agent",
+    "crates/drex-voice",
 
     # Contextra libraries (needed for Drex integration)
     "Contextra/libs/common",
@@ -45,6 +49,7 @@ chrono = { version = "0.4", features = ["serde"] }
 rstest = "0.26"
 tempfile = "3"
 temp-env = "0.3"
+regex = "1.10"
 uuid = { version = "1", features = ["v7", "serde"] }
 
 # Async runtime
@@ -56,7 +61,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Additional Contextra deps
 async-trait = "0.1"
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 axum = { version = "0.7", features = ["macros"] }
 uzun = "0.7"
 qdrant-client = "1.10"

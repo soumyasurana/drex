@@ -1,3 +1,4 @@
+use crate::state::AppState;
 use drex_config::AppConfig;
 // AsyncCommands trait is used via the cmd! macro
 use sqlx::postgres::PgPoolOptions;
@@ -140,6 +141,70 @@ pub async fn run_health_checks(config: &AppConfig) -> bool {
             error!("Redis is not available. Caching and session features will fail.");
         }
         false
+    }
+}
+
+/// Check memory system connectivity and health.
+///
+/// Verifies that the memory backend (Contextra via VectorMemoryStore)
+/// is reachable and can perform basic operations.
+/// Returns `Healthy` if the memory system responds, `Unhealthy` with error details otherwise.
+pub async fn check_memory(app_state: Option<&AppState>) -> HealthStatus {
+    use drex_memory::Memory;
+    use drex_memory::MemoryKind;
+
+    info!("Checking memory system health...");
+
+    // If we don't have an initialized state, we can't check memory
+    let app_state = match app_state {
+        Some(state) => state,
+        None => {
+            let msg = "Memory system not initialized".to_string();
+            warn!("{}", msg);
+            return HealthStatus::Unhealthy(msg);
+        }
+    };
+
+    // Perform a test memory operation
+    // Store a test memory, then retrieve it, then delete it
+    let test_memory = Memory::new(
+        MemoryKind::Working,
+        "Drex memory health check test data",
+    );
+
+    // Try to store
+    let id = match app_state.memory_store.store(test_memory.clone()).await {
+        Ok(id) => id,
+        Err(e) => {
+            let msg = format!("Memory store operation failed: {}", e);
+            error!("{}", msg);
+            return HealthStatus::Unhealthy(msg);
+        }
+    };
+
+    // Try to retrieve
+    match app_state.memory_store.get(id).await {
+        Ok(Some(_)) => {
+            // Success - now clean up
+            match app_state.memory_store.forget(id).await {
+                Ok(()) => {}
+                Err(e) => {
+                    warn!("Failed to clean up test memory during health check: {}", e);
+                }
+            }
+            info!("Memory system is reachable and operational");
+            HealthStatus::Healthy
+        }
+        Ok(None) => {
+            let msg = "Memory retrieval returned no data".to_string();
+            error!("{}", msg);
+            HealthStatus::Unhealthy(msg)
+        }
+        Err(e) => {
+            let msg = format!("Memory retrieval failed: {}", e);
+            error!("{}", msg);
+            HealthStatus::Unhealthy(msg)
+        }
     }
 }
 
