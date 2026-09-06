@@ -2843,7 +2843,6 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tonic",
- "uuid",
 ]
 
 [[package]]
@@ -3913,6 +3912,7 @@ dependencies = [
  "serde_json",
  "sqlx",
  "tokio",
+ "tracing",
  "types",
  "uuid",
 ]

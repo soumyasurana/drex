@@ -5,9 +5,11 @@ pub mod filesystem;
 pub mod terminal;
 pub mod git;
 pub mod web;
+pub mod memory;
 
 pub use echo::EchoTool;
 pub use filesystem::{FileSystemConfig, FileSystemError, FileSystemReadTool};
 pub use terminal::{TerminalConfig, TerminalExecuteTool};
 pub use git::{GitConfig, GitStatusTool, GitDiffTool, GitStatusOutput, GitDiffOutput};
 pub use web::{WebFetchConfig, WebFetchTool, WebFetchOutput};
+pub use memory::{MemoryTool, MemoryInput, MemoryAction, MemoryStoreOutput, MemoryRetrieveOutput};

@@ -9,7 +9,7 @@ use storage::cache::Cache;
 use storage::conversation::ConversationRepository;
 use storage::repository::Repository;
 use storage::session_store::SessionStore;
-use storage::vector_store::{SearchResult as VectorSearchResult, VectorRecord, VectorStore};
+use storage::vector_store::{SearchResult as VectorSearchResult, VectorRecord, VectorStore, SearchResult};
 use types::{ConversationId, Message, Metadata, Role, UserId};
 use uuid::Uuid;
 
@@ -503,6 +503,18 @@ pub trait MemoryStore: Send + Sync {
     /// Returns `ContextraError::NotFound` if the memory doesn't exist.
     /// Returns `ContextraError::StorageError` if the underlying storage fails.
     async fn update(&self, memory: LongTermMemory) -> Result<(), ContextraError>;
+
+    /// Retrieve a single memory by its ID.
+    ///
+    /// # Arguments
+    /// * `id` - The UUID of the memory to retrieve
+    ///
+    /// # Returns
+    /// The memory if found, None if not found
+    ///
+    /// # Errors
+    /// Returns `ContextraError::StorageError` if the underlying storage fails.
+    async fn get(&self, id: Uuid) -> Result<Option<LongTermMemory>, ContextraError>;
 }
 
 #[derive(Debug, Clone)]
@@ -598,7 +610,7 @@ where
             .embed_batch(&[query.to_string()])
             .await
             .map_err(ContextraError::from)?;
-        
+
         let embedding = embeddings
             .into_iter()
             .next()
@@ -607,7 +619,7 @@ where
                     "embedding provider returned no memory query embedding".to_string(),
                 )
             })?;
-        
+
         if embedding.is_empty() {
             return Err(ContextraError::ProviderError(
                 "embedding provider returned empty (0-dimensional) query embedding".to_string()
@@ -673,6 +685,21 @@ where
                 }],
             )
             .await
+    }
+
+    async fn get(&self, id: Uuid) -> Result<Option<LongTermMemory>, ContextraError> {
+        match self.vector_store.get_by_id(&self.collection_name, id).await? {
+            Some(record) => {
+                // Convert VectorRecord to SearchResult for the conversion function
+                let result = SearchResult {
+                    id: record.id,
+                    score: 1.0, // Perfect match for ID lookup
+                    payload: record.payload,
+                };
+                long_term_memory_from_vector_result(result).map(Some)
+            }
+            None => Ok(None),
+        }
     }
 }
 

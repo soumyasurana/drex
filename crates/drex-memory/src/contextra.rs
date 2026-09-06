@@ -206,12 +206,12 @@ where
     }
 
     async fn get(&self, id: MemoryId) -> MemoryResult<Option<Memory>> {
-        // Implement get by using retrieve with an ID query
-        // Since Contextra's recall doesn't support ID lookup directly,
-        // we'll need to retrieve by user and filter
-        let query = MemoryQuery::by_id(id).limit(1);
-        let results = self.retrieve(&query).await?;
-        Ok(results.into_iter().next())
+        // Use the native get-by-ID method for direct lookup
+        match <VectorMemoryStore<S, E> as ContextraMemoryStoreTrait>::get(&*self.inner, id.0).await {
+            Ok(Some(ltm)) => map_long_term_memory_to_drex(ltm).map(Some),
+            Ok(None) => Ok(None),
+            Err(e) => Err(map_contextra_error(e)),
+        }
     }
 
     async fn forget(&self, id: MemoryId) -> MemoryResult<()> {

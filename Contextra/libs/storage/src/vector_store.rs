@@ -53,6 +53,12 @@ pub trait VectorStore: Send + Sync {
         limit: usize,
     ) -> Result<Vec<SearchResult>, ContextraError>;
 
+    async fn get_by_id(
+        &self,
+        collection_name: &str,
+        id: Uuid,
+    ) -> Result<Option<VectorRecord>, ContextraError>;
+
     async fn delete_by_id(&self, collection_name: &str, ids: &[Uuid])
     -> Result<(), ContextraError>;
 }
@@ -229,6 +235,59 @@ impl VectorStore for QdrantVectorStore {
         Ok(results)
     }
 
+    async fn get_by_id(
+        &self,
+        collection_name: &str,
+        id: Uuid,
+    ) -> Result<Option<VectorRecord>, ContextraError> {
+        use qdrant_client::qdrant::point_id::PointIdOptions;
+        use qdrant_client::qdrant::{GetPointsBuilder, PointId};
+
+        // Construct PointId for UUID
+        let point_id = PointId {
+            point_id_options: Some(PointIdOptions::Uuid(id.to_string())),
+        };
+
+        let response = self
+            .client
+            .get_points(
+                GetPointsBuilder::new(collection_name, vec![point_id])
+                    .with_vectors(true)
+                    .with_payload(true),
+            )
+            .await
+            .map_err(|e| {
+                ContextraError::StorageError(format!(
+                    "Failed to get point from Qdrant collection '{collection_name}': {e}"
+                ))
+            })?;
+
+        let point = response.result.into_iter().next();
+        match point {
+            Some(point) => {
+                // Extract vector from response
+                let embedding = match point.vectors {
+                    Some(vectors) => {
+                        // Extract from vectors_options
+                        match vectors.vectors_options {
+                            Some(qdrant_client::qdrant::vectors::VectorsOptions::Vector(v)) => {
+                                v.data.into_iter().map(|val| val as f32).collect()
+                            }
+                            _ => Vec::new(),
+                        }
+                    }
+                    None => Vec::new(),
+                };
+                Ok(Some(VectorRecord {
+                    id: Self::map_point_id(point.id)?,
+                    embedding,
+                    payload: Self::qdrant_payload_to_metadata(point.payload.into())?,
+                }))
+            }
+            None => Ok(None),
+        }
+    }
+
     async fn delete_by_id(
         &self,
         collection_name: &str,
@@ -386,6 +445,19 @@ impl VectorStore for InMemoryVectorStore {
 
         results.truncate(limit);
         Ok(results)
+    }
+
+    async fn get_by_id(
+        &self,
+        collection_name: &str,
+        id: Uuid,
+    ) -> Result<Option<VectorRecord>, ContextraError> {
+        let state = self.state.lock().await;
+        let collection = state.get(collection_name).ok_or_else(|| {
+            ContextraError::NotFound(format!("collection '{collection_name}' not found"))
+        })?;
+
+        Ok(collection.records.get(&id).cloned())
     }
 
     async fn delete_by_id(

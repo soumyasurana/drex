@@ -201,7 +201,7 @@ pub async fn plan(
     debug!(prompt_length = prompt.len(), "Built planning prompt");
 
     // Step 4: Send request to model
-    let model_request = ModelRequest::new("planner-model")
+    let model_request = ModelRequest::new("gemma3:4b")
         .with_message(Message::user(prompt.clone()));
     let response = backend
         .complete(model_request)
@@ -275,8 +275,18 @@ pub async fn plan(
         prompt.push_str("\n\n");
 
         prompt.push_str(
-            "Create a plan with numbered steps. Each step should be a clear, natural language description of what needs to be done.\n\n",
+            "Create a plan with numbered steps using the available tools.\n\n",
         );
+
+        prompt.push_str("Available tools and their use:\n");
+        prompt.push_str("- echo({\"message\": \"<text>\"}) - For testing or echoing information\n");
+        prompt.push_str("- filesystem.read({\"path\": \"<file_path>\"}) - To read a file\n");
+        prompt.push_str("- terminal.execute({\"command\": \"<cmd>\"}) - To run shell commands\n");
+        prompt.push_str("- git.status({\"path\": \"<path>\"}) - To check git repository status\n");
+        prompt.push_str("- git.diff({\"path\": \"<path>\"}) - To see git changes\n");
+        prompt.push_str("- web.fetch({\"url\": \"<url>\"}) - To fetch web pages\n");
+        prompt.push_str("- memory({\"action\": \"store\", \"content\": \"<text>\"}) - To store a memory\n");
+        prompt.push_str("- memory({\"action\": \"retrieve\", \"content\": \"<query>\"}) - To retrieve memories\n\n");
 
         prompt.push_str(
             "If this is a simple question that doesn't require multiple steps, simply provide the answer directly.\n\n",
@@ -284,9 +294,9 @@ pub async fn plan(
 
         prompt.push_str("IMPORTANT: Return your response in this exact format:\n\n");
 
-        prompt.push_str("FORMAT 1 - For multi-step tasks:\n");
-        prompt.push_str("Step 1: <description of first step>\n");
-        prompt.push_str("Step 2: <description of second step>\n");
+        prompt.push_str("FORMAT 1 - For multi-step tasks (use tool call syntax):\n");
+        prompt.push_str("Step 1: call tool_name({\"param\": \"value\"})\n");
+        prompt.push_str("Step 2: call another_tool({\"param\": \"value\"})\n");
         prompt.push_str("...and so on\n\n");
 
         prompt.push_str("FORMAT 2 - For direct answers:\n");

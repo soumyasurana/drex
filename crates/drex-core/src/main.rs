@@ -180,7 +180,42 @@ async fn run_ask(request: String, _trace: bool, dry_run: bool) {
 
     println!("Processing request: {}", request);
     println!();
-    let tool_registry = Arc::new(drex_tools::ToolRegistry::new());
+
+    // Initialize tool registry and register all available tools
+    let mut tool_registry = drex_tools::ToolRegistry::new();
+    let current_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/tmp"));
+
+    // Register harmless tools (no capabilities required)
+    tool_registry.register(Box::new(drex_tools::tools::EchoTool::new()))
+        .map_err(|e| eprintln!("Warning: Failed to register echo tool: {}", e)).ok();
+
+    // Register filesystem tool with config restricting to current directory
+    let fs_config = drex_tools::tools::FileSystemConfig::new(&current_dir);
+    tool_registry.register(Box::new(drex_tools::tools::FileSystemReadTool::new(fs_config)))
+        .map_err(|e| eprintln!("Warning: Failed to register filesystem tool: {}", e)).ok();
+
+    // Register terminal tool
+    let terminal_config = drex_tools::tools::TerminalConfig::new();
+    tool_registry.register(Box::new(drex_tools::tools::TerminalExecuteTool::new(terminal_config)))
+        .map_err(|e| eprintln!("Warning: Failed to register terminal tool: {}", e)).ok();
+
+    // Register git tools with config
+    let git_config = drex_tools::tools::GitConfig::new(&current_dir);
+    tool_registry.register(Box::new(drex_tools::tools::GitStatusTool::new(git_config.clone())))
+        .map_err(|e| eprintln!("Warning: Failed to register git_status tool: {}", e)).ok();
+    tool_registry.register(Box::new(drex_tools::tools::GitDiffTool::new(git_config)))
+        .map_err(|e| eprintln!("Warning: Failed to register git_diff tool: {}", e)).ok();
+
+    // Register web fetch tool
+    let web_config = drex_tools::tools::WebFetchConfig::new();
+    tool_registry.register(Box::new(drex_tools::tools::WebFetchTool::new(web_config)))
+        .map_err(|e| eprintln!("Warning: Failed to register web_fetch tool: {}", e)).ok();
+
+    // Register memory tool for storing/retrieving memories
+    tool_registry.register(Box::new(drex_tools::tools::MemoryTool::new()))
+        .map_err(|e| eprintln!("Warning: Failed to register memory tool: {}", e)).ok();
+
+    let tool_registry = Arc::new(tool_registry);
 
     // Check if we have backends registered
     if !model_router.has_route_for(drex_models::router::TaskKind::Main) {

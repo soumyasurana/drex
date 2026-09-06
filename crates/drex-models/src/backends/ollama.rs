@@ -163,9 +163,17 @@ impl OllamaBackend {
                 TokenUsage::new(prompt_tokens, completion_tokens)
             });
 
+        // Convert ISO 8601 timestamp to Unix timestamp
+        let created_at_unix = ollama_resp.created_at.as_ref().and_then(|ts| {
+            chrono::DateTime::parse_from_rfc3339(ts)
+                .ok()
+                .map(|dt| dt.timestamp())
+        });
+
         ModelResponse {
             id: ollama_resp
                 .created_at
+                .as_ref()
                 .map(|t| format!("ollama-{}", t))
                 .unwrap_or_else(|| format!("ollama-{}", chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0))),
             model: ollama_resp.model.unwrap_or(model),
@@ -174,7 +182,7 @@ impl OllamaBackend {
             tool_calls,
             finish_reason,
             usage,
-            created_at: ollama_resp.created_at,
+            created_at: created_at_unix,
         }
     }
 }
@@ -396,8 +404,8 @@ impl From<&ToolDefinition> for OllamaTool {
 struct OllamaChatResponse {
     /// Model used for generation.
     model: Option<String>,
-    /// Response time.
-    created_at: Option<i64>,
+    /// Response time (ISO 8601 timestamp string).
+    created_at: Option<String>,
     /// Response message.
     message: OllamaMessage,
     /// Whether the response is complete.
@@ -532,7 +540,7 @@ mod tests {
         let backend = create_test_backend();
         let ollama_resp = OllamaChatResponse {
             model: Some("gemma3:4b".to_string()),
-            created_at: Some(1234567890),
+            created_at: Some("2026-09-06T09:33:22.640339223Z".to_string()),
             message: OllamaMessage {
                 role: OllamaRole::Assistant,
                 content: "Hello there".to_string(),
