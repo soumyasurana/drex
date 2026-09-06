@@ -226,7 +226,10 @@ async fn run_ask(request: String, _trace: bool, dry_run: bool) {
         std::process::exit(1);
     }
 
-    let capabilities = drex_tools::CapabilitySet::new();
+    // Grant memory capabilities for memory tool usage
+    let mut capabilities = drex_tools::CapabilitySet::new();
+    capabilities.add(drex_tools::capability::Capability::MemoryRead);
+    capabilities.add(drex_tools::capability::Capability::MemoryWrite);
     let agent_config = AgentConfig::default();
 
     let agent = Agent::new(model_router, tool_registry, capabilities, agent_config);

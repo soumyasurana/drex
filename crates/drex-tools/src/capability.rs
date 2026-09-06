@@ -54,6 +54,12 @@ pub enum Capability {
 
     /// Permission to make HTTP requests via browser
     BrowserRequest,
+
+    /// Permission to read from the memory store
+    MemoryRead,
+
+    /// Permission to write to the memory store
+    MemoryWrite,
 }
 
 impl Capability {
@@ -64,6 +70,8 @@ impl Capability {
             Self::FileSystemWrite => "Write files to the filesystem",
             Self::TerminalExecute => "Execute terminal/shell commands",
             Self::BrowserRequest => "Make HTTP requests via browser",
+            Self::MemoryRead => "Read from the memory store",
+            Self::MemoryWrite => "Write to the memory store",
         }
     }
 
@@ -76,6 +84,8 @@ impl Capability {
             Self::FileSystemWrite => "filesystem.write",
             Self::TerminalExecute => "terminal.execute",
             Self::BrowserRequest => "browser.request",
+            Self::MemoryRead => "memory.read",
+            Self::MemoryWrite => "memory.write",
         }
     }
 
@@ -88,6 +98,8 @@ impl Capability {
             "filesystem.write" => Some(Self::FileSystemWrite),
             "terminal.execute" => Some(Self::TerminalExecute),
             "browser.request" => Some(Self::BrowserRequest),
+            "memory.read" => Some(Self::MemoryRead),
+            "memory.write" => Some(Self::MemoryWrite),
             _ => None,
         }
     }
@@ -99,7 +111,7 @@ impl Capability {
 
     /// Check if this capability is dangerous (potentially destructive).
     pub fn is_dangerous(&self) -> bool {
-        matches!(self, Self::FileSystemWrite | Self::TerminalExecute)
+        matches!(self, Self::FileSystemWrite | Self::TerminalExecute | Self::MemoryWrite)
     }
 
     /// Get all available capabilities.
@@ -109,6 +121,8 @@ impl Capability {
             Self::FileSystemWrite,
             Self::TerminalExecute,
             Self::BrowserRequest,
+            Self::MemoryRead,
+            Self::MemoryWrite,
         ]
     }
 }

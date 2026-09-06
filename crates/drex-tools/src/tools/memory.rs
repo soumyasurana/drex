@@ -160,11 +160,12 @@ impl Tool for MemoryTool {
     }
 
     fn required_capabilities(&self) -> &crate::capability::CapabilitySet {
-        // Memory operations require filesystem write capability
+        // Memory tool requires MemoryRead for retrieve and MemoryWrite for store
         static CAPS: std::sync::OnceLock<crate::capability::CapabilitySet> = std::sync::OnceLock::new();
         CAPS.get_or_init(|| {
             let mut caps = crate::capability::CapabilitySet::new();
-            caps.add(Capability::FileSystemWrite);
+            caps.add(Capability::MemoryRead);
+            caps.add(Capability::MemoryWrite);
             caps
         })
     }
