@@ -12,6 +12,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tracing::debug;
 use types::Metadata;
 use uuid::Uuid;
 
@@ -56,7 +57,6 @@ pub trait VectorStore: Send + Sync {
     -> Result<(), ContextraError>;
 }
 
-#[derive(Clone)]
 pub struct QdrantVectorStore {
     client: Qdrant,
 }
@@ -130,20 +130,30 @@ impl VectorStore for QdrantVectorStore {
             ));
         }
 
-        self.client
+        // Try to create the collection, but if it already exists, treat as success
+        match self
+            .client
             .create_collection(
                 CreateCollectionBuilder::new(collection_name).vectors_config(
                     VectorParamsBuilder::new(vector_size as u64, Distance::Cosine),
                 ),
             )
             .await
-            .map_err(|e| {
-                ContextraError::StorageError(format!(
-                    "Failed to create Qdrant collection '{collection_name}': {e}"
-                ))
-            })?;
-
-        Ok(())
+        {
+            Ok(_) => Ok(()),
+            Err(ref e) => {
+                let error_msg = e.to_string();
+                // Check if the error indicates the collection already exists
+                if error_msg.contains("already exists") {
+                    debug!("Qdrant collection '{}' already exists, skipping creation", collection_name);
+                    Ok(())
+                } else {
+                    Err(ContextraError::StorageError(format!(
+                        "Failed to create Qdrant collection '{collection_name}': {e}"
+                    )))
+                }
+            }
+        }
     }
 
     async fn upsert_vectors(
@@ -151,6 +161,16 @@ impl VectorStore for QdrantVectorStore {
         collection_name: &str,
         records: &[VectorRecord],
     ) -> Result<(), ContextraError> {
+        // Validate embeddings before sending to Qdrant
+        for (idx, record) in records.iter().enumerate() {
+            if record.embedding.is_empty() {
+                return Err(ContextraError::Validation(format!(
+                    "Record at index {} has empty (0-dimensional) embedding - this indicates the embedding provider failed",
+                    idx
+                )));
+            }
+        }
+
         let points: Result<Vec<PointStruct>, ContextraError> = records
             .iter()
             .map(|record| {

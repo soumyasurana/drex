@@ -89,8 +89,16 @@ async fn run_health_check() {
     // Check Memory
     print!("Memory:     ");
     let memory_config = MemoryConfig::default();
-    let app_state = initialize_app_state(config, memory_config).await.ok();
-    let memory_health = check_memory(app_state.as_ref()).await;
+    let (app_state, memory_health) = match initialize_app_state(config, memory_config).await {
+        Ok(state) => {
+            let health = check_memory(Some(&state)).await;
+            (Some(state), health)
+        }
+        Err(e) => {
+            let msg = format!("Failed to initialize memory: {}", e);
+            (None, HealthStatus::Unhealthy(msg))
+        }
+    };
     match &memory_health {
         HealthStatus::Healthy => println!("✓ Healthy"),
         HealthStatus::Unhealthy(msg) => println!("✗ Unhealthy: {}", msg),
@@ -149,6 +157,18 @@ async fn run_ask(request: String, _trace: bool, dry_run: bool) {
     info!("Initializing memory subsystem...");
     let memory_config = MemoryConfig::default();
 
+    // Create agent with Ollama backend configured
+    let mut model_router = drex_models::router::ModelRouter::new();
+
+    // Register Ollama backend from configuration
+    let ollama_backend = drex_models::backends::OllamaBackend::from_drex_config(&config.ollama);
+    model_router.register(
+        drex_models::router::TaskKind::Main,
+        Box::new(ollama_backend),
+    );
+
+    let model_router = Arc::new(model_router);
+
     let _app_state = match initialize_app_state(config, memory_config).await {
         Ok(state) => state,
         Err(e) => {
@@ -160,9 +180,6 @@ async fn run_ask(request: String, _trace: bool, dry_run: bool) {
 
     println!("Processing request: {}", request);
     println!();
-
-    // Create agent (simplified - in full implementation would wire up properly)
-    let model_router = Arc::new(drex_models::router::ModelRouter::new());
     let tool_registry = Arc::new(drex_tools::ToolRegistry::new());
 
     // Check if we have backends registered

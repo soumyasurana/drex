@@ -60,7 +60,7 @@ services:
 
   # Qdrant: Vector database for semantic memory
   qdrant:
-    image: qdrant/qdrant:v1.8.0
+    image: qdrant/qdrant:v1.12.0
     container_name: drex-qdrant
     restart: unless-stopped
     ports:

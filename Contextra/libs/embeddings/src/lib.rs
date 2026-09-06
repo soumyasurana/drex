@@ -294,7 +294,7 @@ impl EmbeddingProvider for OllamaEmbeddingProvider {
         }
 
         let body = response.json::<OllamaEmbeddingResponse>().await?;
-        Ok(body.embeddings)
+        body.into_embeddings()
     }
 
     fn dimensions(&self) -> usize {
@@ -314,7 +314,39 @@ struct OllamaEmbeddingRequest<'a> {
 
 #[derive(Debug, Deserialize)]
 struct OllamaEmbeddingResponse {
-    embeddings: Vec<Embedding>,
+    // For single input, Ollama returns "embedding" (singular)
+    // For multiple inputs, Ollama returns "embeddings" (plural)
+    embedding: Option<Embedding>,
+    embeddings: Option<Vec<Embedding>>,
+}
+
+impl OllamaEmbeddingResponse {
+    fn into_embeddings(self) -> Result<Vec<Embedding>, EmbeddingError> {
+        let embeddings = match (self.embedding, self.embeddings) {
+            // Multiple inputs case: embeddings field is present
+            (_, Some(embeddings)) => embeddings,
+            // Single input case: embedding field is present
+            (Some(embedding), _) => vec![embedding],
+            // Neither field present: error
+            (None, None) => {
+                return Err(EmbeddingError::Decode(
+                    "Ollama response missing both 'embedding' and 'embeddings' fields".to_string()
+                ));
+            }
+        };
+
+        // Validate that no embeddings are empty (zero-dimensional)
+        for (index, embedding) in embeddings.iter().enumerate() {
+            if embedding.is_empty() {
+                return Err(EmbeddingError::Decode(format!(
+                    "Ollama returned empty embedding at index {} - this indicates the model is not loaded or the embedding request failed", 
+                    index
+                )));
+            }
+        }
+
+        Ok(embeddings)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -747,5 +779,81 @@ mod tests {
             input.bytes().next().unwrap_or_default() as f32,
             1.0,
         ]
+    }
+
+    #[test]
+    fn ollama_response_single_input() {
+        // Ollama /api/embed returns "embedding" (singular) for single input
+        let json = r#"{"embedding":[0.1,0.2,0.3]}"#;
+        let response: OllamaEmbeddingResponse = serde_json::from_str(json).unwrap();
+        let embeddings = response.into_embeddings().unwrap();
+        assert_eq!(embeddings.len(), 1);
+        assert_eq!(embeddings[0], vec![0.1, 0.2, 0.3]);
+    }
+
+    #[test]
+    fn ollama_response_multiple_inputs() {
+        // Ollama /api/embed returns "embeddings" (plural) for multiple inputs
+        let json = r#"{"embeddings":[[0.1,0.2],[0.3,0.4]]}"#;
+        let response: OllamaEmbeddingResponse = serde_json::from_str(json).unwrap();
+        let embeddings = response.into_embeddings().unwrap();
+        assert_eq!(embeddings.len(), 2);
+        assert_eq!(embeddings[0], vec![0.1, 0.2]);
+        assert_eq!(embeddings[1], vec![0.3, 0.4]);
+    }
+
+    #[test]
+    fn ollama_response_neither_field_fails() {
+        // Response with neither embedding nor embeddings should error
+        let json = r#"{"some_other_field": []}"#;
+        let response: OllamaEmbeddingResponse = serde_json::from_str(json).unwrap();
+        assert!(response.into_embeddings().is_err());
+    }
+
+    #[test]
+    fn ollama_response_empty_embedding_is_error() {
+        // Empty embedding vector (zero-dimensional) should be detected and return an error
+        let json = r#"{"embedding":[]}"#;
+        let response: OllamaEmbeddingResponse = serde_json::from_str(json).unwrap();
+        let result = response.into_embeddings();
+        assert!(result.is_err(), "Empty embedding should return an error");
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("empty embedding"), "Error should mention empty embedding: {}", err);
+    }
+
+    /// Integration test: verifies that the Ollama embedding provider can actually
+    /// connect to Ollama and return non-empty embeddings.
+    /// 
+    /// This test requires:
+    /// - Ollama running at http://localhost:11434
+    /// - nomic-embed-text model pulled
+    /// 
+    /// Run with: cargo test -p embeddings --lib ollama_integration -- --ignored
+    #[tokio::test]
+    #[ignore = "Requires Ollama to be running"]
+    async fn ollama_integration_returns_valid_embeddings() {
+        let provider = OllamaEmbeddingProvider::with_base_url(
+            "nomic-embed-text",
+            768,
+            "http://localhost:11434",
+        );
+        
+        // Test single input
+        let embeddings = provider.embed_batch(&["hello".to_string()]).await
+            .expect("Should successfully get embeddings from Ollama");
+        
+        assert_eq!(embeddings.len(), 1, "Should return exactly one embedding for single input");
+        assert!(!embeddings[0].is_empty(), "Embedding should not be empty");
+        assert_eq!(embeddings[0].len(), 768, "Embedding should have expected dimensions (768)");
+        
+        // Test multiple inputs
+        let multi_embeddings = provider.embed_batch(&[
+            "first text".to_string(),
+            "second text".to_string(),
+        ]).await.expect("Should successfully get embeddings for multiple inputs");
+        
+        assert_eq!(multi_embeddings.len(), 2, "Should return exactly two embeddings");
+        assert_eq!(multi_embeddings[0].len(), 768, "First embedding should have 768 dimensions");
+        assert_eq!(multi_embeddings[1].len(), 768, "Second embedding should have 768 dimensions");
     }
 }

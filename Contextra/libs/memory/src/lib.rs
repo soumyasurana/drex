@@ -552,11 +552,13 @@ where
             ));
         }
 
-        let embedding = self
+        let embeddings = self
             .embedding_provider
             .embed_batch(std::slice::from_ref(&memory.content))
             .await
-            .map_err(ContextraError::from)?
+            .map_err(ContextraError::from)?;
+        
+        let embedding = embeddings
             .into_iter()
             .next()
             .ok_or_else(|| {
@@ -564,6 +566,13 @@ where
                     "embedding provider returned no memory embedding".to_string(),
                 )
             })?;
+        
+        // Validate embedding dimensions
+        if embedding.is_empty() {
+            return Err(ContextraError::ProviderError(
+                "embedding provider returned empty (0-dimensional) embedding".to_string()
+            ));
+        }
 
         let payload = memory_payload(&memory);
         self.vector_store
@@ -584,11 +593,13 @@ where
         query: &str,
         limit: usize,
     ) -> Result<Vec<LongTermMemory>, ContextraError> {
-        let embedding = self
+        let embeddings = self
             .embedding_provider
             .embed_batch(&[query.to_string()])
             .await
-            .map_err(ContextraError::from)?
+            .map_err(ContextraError::from)?;
+        
+        let embedding = embeddings
             .into_iter()
             .next()
             .ok_or_else(|| {
@@ -596,6 +607,13 @@ where
                     "embedding provider returned no memory query embedding".to_string(),
                 )
             })?;
+        
+        if embedding.is_empty() {
+            return Err(ContextraError::ProviderError(
+                "embedding provider returned empty (0-dimensional) query embedding".to_string()
+            ));
+        }
+        
         let filter = RetrievalFilter {
             user_id: Some(user_id.to_string()),
             ..RetrievalFilter::default()
@@ -1240,5 +1258,58 @@ mod tests {
             content: content.to_string(),
             metadata: Metadata::new(),
         }
+    }
+
+    /// Integration test for Ollama-based embedding generation.
+    /// 
+    /// This test requires:
+    /// - Ollama running at http://localhost:11434
+    /// - nomic-embed-text model pulled
+    /// - Qdrant running at http://localhost:6333
+    /// 
+    /// Run with: cargo test -p memory --lib vector_memory_store_with_ollama -- --ignored
+    #[tokio::test]
+    #[ignore = "Requires Ollama and Qdrant to be running"]
+    async fn vector_memory_store_with_ollama() -> Result<(), Box<dyn std::error::Error>> {
+        use embeddings::OllamaEmbeddingProvider;
+        use storage::vector_store::QdrantVectorStore;
+        use uuid::Uuid;
+
+        // Connect to Qdrant
+        let vector_store = QdrantVectorStore::connect("http://localhost:6333", None)?;
+        
+        // Create Ollama embedding provider
+        let embedding_provider = OllamaEmbeddingProvider::with_base_url(
+            "nomic-embed-text",
+            768,
+            "http://localhost:11434",
+        );
+        
+        // Create VectorMemoryStore with unique collection
+        let memory_store = VectorMemoryStore::new(vector_store, embedding_provider);
+        
+        // Ensure collection exists
+        memory_store.create_collection().await?;
+
+        // Try to remember something
+        let memory = LongTermMemory::new(
+            UserId::new(),
+            LongTermMemoryKind::Fact,
+            "Test memory content for Ollama integration",
+            0.8,
+            Metadata::new(),
+        );
+
+        memory_store.remember(memory).await
+            .map_err(|e| format!("Failed to store memory: {}", e))?;
+
+        // Verify we can recall it
+        let results = memory_store
+            .recall(UserId::new(), "test memory", 5)
+            .await?;
+        
+        assert!(!results.is_empty(), "Should find at least one result");
+        
+        Ok(())
     }
 }

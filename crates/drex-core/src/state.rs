@@ -8,7 +8,8 @@ use async_trait::async_trait;
 use drex_memory::{
     Confidence, MemoryStore, RuleBasedPolicy, TaskTrustLevel,
 };
-use storage::vector_store::InMemoryVectorStore;
+use embeddings::OllamaEmbeddingProvider;
+use storage::vector_store::QdrantVectorStore;
 use std::sync::Arc;
 use tracing::{error, info, warn};
 
@@ -155,15 +156,20 @@ pub async fn initialize_app_state(
     );
 
     // Step 2: Initialize memory store backend
-    // For now, we always use the stub provider since external providers require API keys
-    info!("Initializing memory store with stub embedding provider...");
-    
-    let memory_store = if memory_config.use_in_memory {
-        info!("Using in-memory vector store");
-        create_memory_store(memory_policy.clone())
-    } else {
-        info!("Using in-memory vector store (production backend not yet configured)");
-        create_memory_store(memory_policy.clone())
+    info!("Initializing memory store with real backends...");
+    info!("Connecting to Qdrant at {} for vector storage", &config.qdrant.url);
+    info!("Using Ollama at {} for embeddings", &config.ollama.base_url);
+
+    let memory_store = match create_memory_store(memory_policy.clone(), &config).await {
+        Ok(store) => {
+            info!("Memory store initialized successfully with real backends");
+            store
+        }
+        Err(e) => {
+            let msg = format!("Failed to initialize memory store: {}", e);
+            error!("{}", msg);
+            return Err(msg);
+        }
     };
 
     // Step 3: Verify memory system is functional
@@ -190,18 +196,45 @@ pub async fn initialize_app_state(
     Ok(state)
 }
 
-/// Create a memory store with the given policy.
+/// Create a memory store with the given policy and configuration.
 /// This helper function centralizes store creation logic.
-fn create_memory_store(policy: Arc<RuleBasedPolicy>) -> Box<dyn MemoryStore> {
-    let vector_store = InMemoryVectorStore::new();
-    let embedding_provider = StubEmbeddingProvider::new(128);
-    let raw_store = drex_memory::ContextraMemoryStore::new(
-        memory::VectorMemoryStore::new(vector_store, embedding_provider)
+///
+/// Creates real storage backends connected to Qdrant and Ollama.
+async fn create_memory_store(
+    policy: Arc<RuleBasedPolicy>,
+    config: &drex_config::AppConfig,
+) -> Result<Box<dyn MemoryStore>, String> {
+    // Connect to Qdrant for vector storage
+    let vector_store = QdrantVectorStore::connect(&config.qdrant.url, config.qdrant.api_key.clone())
+        .map_err(|e| format!("Failed to connect to Qdrant: {}", e))?;
+
+    // Create Ollama embedding provider
+    // Default to nomic-embed-text which is a good embedding model for Ollama
+    let embedding_model = std::env::var("DREX_EMBEDDING_MODEL")
+        .unwrap_or_else(|_| "nomic-embed-text".to_string());
+    let embedding_provider = OllamaEmbeddingProvider::with_base_url(
+        &embedding_model,
+        768, // nomic-embed-text outputs 768 dimensions
+        &config.ollama.base_url,
     );
-    Box::new(drex_memory::PolicyEnforcingStore::new(
+
+    // Create the memory store
+    let vector_memory_store = memory::VectorMemoryStore::new(vector_store, embedding_provider);
+
+    // Ensure the collection exists before using the store
+    info!("Creating Qdrant collection 'long-term-memory' if needed...");
+    vector_memory_store.create_collection().await
+        .map_err(|e| format!("Failed to create Qdrant collection: {}", e))?;
+
+    let raw_store = drex_memory::ContextraMemoryStore::new(vector_memory_store);
+
+    info!("Memory store created with Qdrant (at {}) and Ollama (at {})",
+        config.qdrant.url, config.ollama.base_url);
+
+    Ok(Box::new(drex_memory::PolicyEnforcingStore::new(
         (*policy).clone(),
         raw_store,
-    ))
+    )))
 }
 
 /// Verify memory system is functional by performing a test operation.
