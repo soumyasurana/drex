@@ -11,6 +11,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 storage = { path = "../storage" }
 types = { path = "../types" }
+tracing = "0.1"
 uuid = { workspace = true }
 
 [lints]

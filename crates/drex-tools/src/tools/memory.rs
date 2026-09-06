@@ -6,8 +6,10 @@ use crate::result::ExecutionResult;
 use crate::schema::{ToolSchema, JsonSchema};
 use crate::tool::{Tool, ToolContext, ToolInput, ToolMetadata};
 use async_trait::async_trait;
+use drex_memory::{Memory, MemoryKind, MemoryMetadata, MemoryStore};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use tracing::{debug, warn};
 
 /// A tool for storing and retrieving memories.
 ///
@@ -177,24 +179,116 @@ impl Tool for MemoryTool {
             reason: format!("failed to parse input: {}", e),
         })?;
 
-        // For now, return a success response indicating the tool was invoked
-        // The actual memory store integration will be handled by the agent
+        // Get the memory store from context - it must be available for memory operations
+        let Some(memory_store) = ctx.memory_store() else {
+            return Err(ToolError::ExecutionFailed {
+                tool: self.name().to_string(),
+                reason: "Memory store not available in tool context".to_string(),
+            });
+        };
+
         match memory_input.action {
             MemoryAction::Store => {
-                let output = MemoryStoreOutput {
-                    memory_id: format!("mem_{}", uuid::Uuid::now_v7()),
-                    message: "Memory stored successfully".to_string(),
-                    content: memory_input.content.clone(),
-                };
-                Ok(ExecutionResult::success(json!(output)))
+                // Create a memory with the provided content
+                let memory = Memory::new(MemoryKind::Semantic, &memory_input.content)
+                    .with_metadata(MemoryMetadata::automatic("drex-agent"))
+                    .with_importance(memory_input.importance);
+
+                // Actually persist to the memory store
+                match memory_store.store(memory).await {
+                    Ok(memory_id) => {
+                        debug!(memory_id = %memory_id, "Successfully stored memory");
+                        let output = MemoryStoreOutput {
+                            memory_id: memory_id.to_string(),
+                            message: "Memory stored successfully".to_string(),
+                            content: memory_input.content.clone(),
+                        };
+                        Ok(ExecutionResult::success(json!(output)))
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "Failed to store memory");
+                        Err(ToolError::ExecutionFailed {
+                            tool: self.name().to_string(),
+                            reason: format!("Memory store failed: {}", e),
+                        })
+                    }
+                }
             }
             MemoryAction::Retrieve => {
-                let output = MemoryRetrieveOutput {
-                    query: memory_input.content.clone(),
-                    count: 0,
-                    memories: vec![],
-                };
-                Ok(ExecutionResult::success(json!(output)))
+                use drex_memory::MemoryQuery;
+
+                // Build a query from the content
+                let query = MemoryQuery::search(&memory_input.content);
+
+                tracing::info!(
+                    query = %memory_input.content,
+                    limit = query.limit,
+                    "MEMORY_TOOL: Starting retrieve"
+                );
+
+                // Actually retrieve from the memory store
+                match memory_store.retrieve(&query).await {
+                    Ok(memories) => {
+                        tracing::info!(
+                            memory_count = memories.len(),
+                            "MEMORY_TOOL: memory_store.retrieve() returned"
+                        );
+
+                        // Log first few memory IDs
+                        for (idx, m) in memories.iter().take(3).enumerate() {
+                            tracing::info!(
+                                idx = idx,
+                                id = %m.id,
+                                content_preview = %if m.content.len() > 30 { format!("{}...", &m.content[..30]) } else { m.content.clone() },
+                                kind = ?m.kind,
+                                "MEMORY_TOOL: Raw memory {}"
+                            , idx);
+                        }
+
+                        let retrieved: Vec<RetrievedMemory> = memories
+                            .into_iter()
+                            .map(|m| RetrievedMemory {
+                                id: m.id.to_string(),
+                                content: m.content.clone(),
+                                kind: format!("{:?}", m.kind).to_lowercase(),
+                                relevance: Some(m.importance),
+                            })
+                            .collect();
+
+                        tracing::info!(
+                            converted_count = retrieved.len(),
+                            "MEMORY_TOOL: Converted to RetrievedMemory"
+                        );
+
+                        let output = MemoryRetrieveOutput {
+                            query: memory_input.content.clone(),
+                            count: retrieved.len(),
+                            memories: retrieved.clone(),
+                        };
+
+                        tracing::info!(
+                            output_count = output.count,
+                            output_memories_len = output.memories.len(),
+                            "MEMORY_TOOL: Built MemoryRetrieveOutput"
+                        );
+
+                        // Log serialized JSON for debugging
+                        let json_output = json!(output);
+                        tracing::info!(
+                            json_preview = %if json_output.to_string().len() > 100 { format!("{}...", &json_output.to_string()[..100]) } else { json_output.to_string() },
+                            "MEMORY_TOOL: Serialized JSON output"
+                        );
+
+                        Ok(ExecutionResult::success(json_output))
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "Failed to retrieve memories");
+                        Err(ToolError::ExecutionFailed {
+                            tool: self.name().to_string(),
+                            reason: format!("Memory retrieval failed: {}", e),
+                        })
+                    }
+                }
             }
         }
     }
@@ -203,6 +297,40 @@ impl Tool for MemoryTool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use crate::capability::{CapabilitySet, Capability};
+
+    /// Simple mock memory store for testing
+    struct MockMemoryStore {
+        next_id: AtomicU64,
+    }
+
+    impl MockMemoryStore {
+        fn new() -> Self {
+            Self { next_id: AtomicU64::new(1) }
+        }
+    }
+
+    #[async_trait]
+    impl drex_memory::MemoryStore for MockMemoryStore {
+        async fn store(&self, _memory: drex_memory::Memory) -> Result<drex_memory::MemoryId, drex_memory::MemoryStoreError> {
+            let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+            Ok(drex_memory::MemoryId::from(uuid::Uuid::from_u64_pair(id, 0)))
+        }
+
+        async fn retrieve(&self, _query: &drex_memory::MemoryQuery) -> Result<Vec<drex_memory::Memory>, drex_memory::MemoryStoreError> {
+            Ok(vec![])
+        }
+
+        async fn forget(&self, _id: drex_memory::MemoryId) -> Result<(), drex_memory::MemoryStoreError> {
+            Err(drex_memory::MemoryStoreError::UnsupportedOperation("delete not supported".to_string()))
+        }
+
+        async fn update(&self, _id: drex_memory::MemoryId, _patch: drex_memory::MemoryPatch) -> Result<drex_memory::Memory, drex_memory::MemoryStoreError> {
+            Err(drex_memory::MemoryStoreError::UnsupportedOperation("update not supported".to_string()))
+        }
+    }
 
     #[test]
     fn memory_tool_creation() {
@@ -261,13 +389,11 @@ mod tests {
     #[tokio::test]
     async fn memory_tool_execution_store() {
         let tool = MemoryTool::new();
-        let ctx = ToolContext::new();
+        let mock_store: Arc<dyn drex_memory::MemoryStore> = Arc::new(MockMemoryStore::new());
 
-        // Grant the required capability
-        let caps = crate::capability::CapabilitySet::from(vec![
-            Capability::FileSystemWrite,
-        ]);
-        let ctx = ToolContext::with_capabilities(caps);
+        // Create context with memory store and required capabilities
+        let ctx = ToolContext::with_capabilities(CapabilitySet::from(vec![Capability::MemoryWrite]))
+            .with_memory_store(mock_store);
 
         let input = ToolInput::from_json(json!({
             "action": "store",
@@ -286,11 +412,11 @@ mod tests {
     #[tokio::test]
     async fn memory_tool_execution_retrieve() {
         let tool = MemoryTool::new();
+        let mock_store: Arc<dyn drex_memory::MemoryStore> = Arc::new(MockMemoryStore::new());
 
-        let caps = crate::capability::CapabilitySet::from(vec![
-            Capability::FileSystemWrite,
-        ]);
-        let ctx = ToolContext::with_capabilities(caps);
+        // Create context with memory store and required capabilities
+        let ctx = ToolContext::with_capabilities(CapabilitySet::from(vec![Capability::MemoryRead]))
+            .with_memory_store(mock_store);
 
         let input = ToolInput::from_json(json!({
             "action": "retrieve",
@@ -308,17 +434,20 @@ mod tests {
     #[tokio::test]
     async fn memory_tool_rejects_unauthorized() {
         let tool = MemoryTool::new();
-        let ctx = ToolContext::new(); // No capabilities granted
+        let mock_store = Arc::new(MockMemoryStore::new());
+
+        // Create context with memory store but NO capabilities granted
+        let ctx = ToolContext::new()
+            .with_memory_store(mock_store);
 
         let input = ToolInput::from_json(json!({
             "action": "store",
             "content": "Test"
         })).unwrap();
 
-        // The tool should still execute but the agent's authorization check should fail
-        // In practice, the agent checks capabilities before executing
+        // The tool should still execute - capabilities are checked by AuthorizedToolRegistry
+        // at the agent level, not by the tool itself
         let result = tool.execute(&ctx, input).await;
-        // Tool execution succeeds, but authorization should be checked at a higher level
         assert!(result.is_ok());
     }
 

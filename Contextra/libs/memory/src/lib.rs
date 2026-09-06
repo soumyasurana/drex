@@ -605,6 +605,13 @@ where
         query: &str,
         limit: usize,
     ) -> Result<Vec<LongTermMemory>, ContextraError> {
+        tracing::info!(
+            query = %query,
+            limit = limit,
+            collection = %self.collection_name,
+            "MEMORY_RETRIEVAL: Starting recall"
+        );
+
         let embeddings = self
             .embedding_provider
             .embed_batch(&[query.to_string()])
@@ -625,24 +632,119 @@ where
                 "embedding provider returned empty (0-dimensional) query embedding".to_string()
             ));
         }
-        
+
+        // Log embedding statistics (not the full vector)
+        let embedding_preview = if embedding.len() > 5 {
+            format!("{:?}... ({} dims)", &embedding[..5], embedding.len())
+        } else {
+            format!("{:?} ({} dims)", embedding, embedding.len())
+        };
+        tracing::info!(
+            embedding_preview = %embedding_preview,
+            embedding_nonzero = embedding.iter().any(|&v| v != 0.0),
+            "MEMORY_RETRIEVAL: Generated query embedding"
+        );
+
+        // Build filter - don't filter by user_id for now
         let filter = RetrievalFilter {
-            user_id: Some(user_id.to_string()),
+            user_id: None,
             ..RetrievalFilter::default()
         };
 
-        self.vector_store
+        tracing::info!(
+            filter = ?filter,
+            "MEMORY_RETRIEVAL: Using retrieval filter"
+        );
+
+        // Call Qdrant search
+        let search_limit = limit.max(1).saturating_mul(4);
+        tracing::info!(
+            collection = %self.collection_name,
+            search_limit = search_limit,
+            return_limit = limit,
+            "MEMORY_RETRIEVAL: Calling Qdrant search"
+        );
+
+        let results = self.vector_store
             .search(
                 &self.collection_name,
                 &embedding,
-                limit.max(1).saturating_mul(4),
+                search_limit,
             )
-            .await?
+            .await?;
+
+        tracing::info!(
+            raw_result_count = results.len(),
+            "MEMORY_RETRIEVAL: Raw Qdrant results"
+        );
+
+        // Log each raw result BEFORE filtering
+        for (idx, result) in results.iter().enumerate() {
+            let content_preview = result.payload
+                .get("content")
+                .and_then(|v| v.as_str())
+                .map(|s| if s.len() > 50 { format!("{}...", &s[..50]) } else { s.to_string() })
+                .unwrap_or_else(|| "[no content]".to_string());
+            
+            tracing::info!(
+                idx = idx,
+                score = result.score,
+                id = %result.id,
+                content_preview = %content_preview,
+                "MEMORY_RETRIEVAL: Raw result {}"
+            , idx);
+        }
+
+        // Apply filter and log rejections
+        let mut filtered_results = Vec::new();
+        let mut rejected_count = 0;
+        
+        for result in &results {
+            let matches = filter.matches(&result.payload);
+            if matches {
+                filtered_results.push(result.clone());
+            } else {
+                rejected_count += 1;
+                let content_preview = result.payload
+                    .get("content")
+                    .and_then(|v| v.as_str())
+                    .map(|s| if s.len() > 30 { format!("{}...", &s[..30]) } else { s.to_string() })
+                    .unwrap_or_else(|| "[no content]".to_string());
+                
+                // Log why it was rejected
+                let payload_keys: Vec<_> = result.payload.keys().cloned().collect();
+                tracing::info!(
+                    id = %result.id,
+                    score = result.score,
+                    content_preview = %content_preview,
+                    payload_keys = ?payload_keys,
+                    "MEMORY_RETRIEVAL: Filter REJECTED result"
+                );
+                
+                // Call trace function for detailed failure analysis
+                filter.trace_match_failure(&result.payload);
+            }
+        }
+
+        tracing::info!(
+            accepted = filtered_results.len(),
+            rejected = rejected_count,
+            "MEMORY_RETRIEVAL: After filter"
+        );
+
+        // Convert and limit results
+        let final_results: Vec<LongTermMemory> = filtered_results
             .into_iter()
-            .filter(|result| filter.matches(&result.payload))
             .take(limit.max(1))
-            .map(long_term_memory_from_vector_result)
-            .collect()
+            .map(|r| long_term_memory_from_vector_result(r))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        tracing::info!(
+            final_count = final_results.len(),
+            "MEMORY_RETRIEVAL: Returning results"
+        );
+
+        Ok(final_results)
     }
 
     async fn forget(&self, ids: &[Uuid]) -> Result<(), ContextraError> {
@@ -1334,9 +1436,9 @@ mod tests {
         let results = memory_store
             .recall(UserId::new(), "test memory", 5)
             .await?;
-        
+
         assert!(!results.is_empty(), "Should find at least one result");
-        
+
         Ok(())
     }
 }

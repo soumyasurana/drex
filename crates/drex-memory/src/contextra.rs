@@ -174,6 +174,12 @@ where
 
         let query_text = query.query_text.as_deref().unwrap_or("");
 
+        tracing::info!(
+            query_text = %query_text,
+            limit = query.limit,
+            "DREX_MEMORY: ContextraMemoryStore.retrieve() START"
+        );
+
         let results = <VectorMemoryStore<S, E> as ContextraMemoryStoreTrait>::recall(
             &*self.inner,
             user_id,
@@ -183,6 +189,21 @@ where
         .await
         .map_err(map_contextra_error)?;
 
+        tracing::info!(
+            contextra_result_count = results.len(),
+            "DREX_MEMORY: Contextra recall() returned"
+        );
+
+        // Log first few results from Contextra
+        for (idx, ltm) in results.iter().take(3).enumerate() {
+            tracing::info!(
+                idx = idx,
+                id = %ltm.id,
+                content_preview = %if ltm.content.len() > 40 { format!("{}...", &ltm.content[..40]) } else { ltm.content.clone() },
+                "DREX_MEMORY: Contextra result {}"
+            , idx);
+        }
+
         let memories: Vec<Memory> = results
             .into_iter()
             .filter_map(|ltm| match map_long_term_memory_to_drex(ltm) {
@@ -191,16 +212,23 @@ where
                     if matches_memory_query(&memory, query) {
                         Some(memory)
                     } else {
+                        tracing::trace!(memory_id = %memory.id, "DREX_MEMORY: matches_memory_query REJECTED");
                         None
                     }
                 }
                 Err(e) => {
-                    tracing::warn!("Failed to map memory: {}", e);
+                    tracing::warn!("DREX_MEMORY: Failed to map memory: {}", e);
                     None
                 }
             })
             .take(query.limit)
             .collect();
+
+        tracing::info!(
+            final_count = memories.len(),
+            first_ids = ?memories.iter().take(3).map(|m| (m.id.to_string(), if m.content.len() > 30 { m.content[..30].to_string() } else { m.content.clone() })).collect::<Vec<_>>(),
+            "DREX_MEMORY: ContextraMemoryStore.retrieve() END - returning memories"
+        );
 
         Ok(memories)
     }

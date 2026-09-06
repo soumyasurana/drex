@@ -123,6 +123,8 @@ pub enum ValidationResult {
 pub struct StepExecutor {
     registry: Arc<ToolRegistry>,
     capabilities: CapabilitySet,
+    /// Optional memory store for tools that need to persist/retrieve memories
+    memory_store: Option<Arc<dyn drex_memory::MemoryStore>>,
 }
 
 impl StepExecutor {
@@ -131,7 +133,26 @@ impl StepExecutor {
         Self {
             registry,
             capabilities,
+            memory_store: None,
         }
+    }
+
+    /// Create a new step executor with a memory store.
+    pub fn with_memory_store(
+        registry: Arc<ToolRegistry>,
+        capabilities: CapabilitySet,
+        memory_store: Arc<dyn drex_memory::MemoryStore>,
+    ) -> Self {
+        Self {
+            registry,
+            capabilities,
+            memory_store: Some(memory_store),
+        }
+    }
+
+    /// Set the memory store for this executor.
+    pub fn set_memory_store(&mut self, memory_store: Arc<dyn drex_memory::MemoryStore>) {
+        self.memory_store = Some(memory_store);
     }
 
     /// Translate a plan step into a tool call or direct answer.
@@ -461,8 +482,15 @@ impl StepExecutor {
             }
         })?;
 
+        // Build a context with memory store if available
+        let execution_context = if let Some(ref store) = self.memory_store {
+            context.clone().with_memory_store(store.clone())
+        } else {
+            context.clone()
+        };
+
         // Execute with authorization check
-        let result = tool.execute(context, input).await.map_err(|e| {
+        let result = tool.execute(&execution_context, input).await.map_err(|e| {
             ExecutionError::ExecutionFailed {
                 tool: tool_call.tool_name.clone(),
                 reason: e.to_string(),

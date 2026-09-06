@@ -12,6 +12,7 @@ retrieval = { path = "../retrieval" }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 storage = { path = "../storage" }
+tracing = "0.1"
 types = { path = "../types" }
 uuid = { workspace = true }
 

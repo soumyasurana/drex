@@ -34,6 +34,7 @@ tracing.workspace = true
 
 # Drex dependencies
 drex-config = { path = "../drex-config" }
+drex-memory = { path = "../drex-memory" }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros"] }

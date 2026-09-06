@@ -169,7 +169,7 @@ async fn run_ask(request: String, _trace: bool, dry_run: bool) {
 
     let model_router = Arc::new(model_router);
 
-    let _app_state = match initialize_app_state(config, memory_config).await {
+    let app_state = match initialize_app_state(config, memory_config).await {
         Ok(state) => state,
         Err(e) => {
             error!("Failed to initialize: {}", e);
@@ -177,6 +177,9 @@ async fn run_ask(request: String, _trace: bool, dry_run: bool) {
             std::process::exit(1);
         }
     };
+
+    // Get memory store from app_state for use by agent/tools
+    let memory_store: Arc<dyn drex_memory::MemoryStore> = app_state.memory_store;
 
     println!("Processing request: {}", request);
     println!();
@@ -234,8 +237,8 @@ async fn run_ask(request: String, _trace: bool, dry_run: bool) {
 
     let agent = Agent::new(model_router, tool_registry, capabilities, agent_config);
 
-    // Execute the agent
-    match agent.execute(&request, None).await {
+    // Execute the agent with memory store
+    match agent.execute(&request, Some(memory_store)).await {
         Ok(result) => {
             println!();
             println!("==================");

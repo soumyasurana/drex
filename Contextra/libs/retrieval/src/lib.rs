@@ -316,7 +316,7 @@ impl RetrievalFilter {
     }
 
     pub fn matches(&self, payload: &Metadata) -> bool {
-        self.matches_scalar(payload, "collection", self.collection.as_deref())
+        let result = self.matches_scalar(payload, "collection", self.collection.as_deref())
             && self.matches_scalar(payload, "user_id", self.user_id.as_deref())
             && self.matches_scalar(payload, "organization_id", self.organization_id.as_deref())
             && self.matches_scalar(payload, "language", self.language.as_deref())
@@ -326,7 +326,54 @@ impl RetrievalFilter {
             && self
                 .metadata
                 .iter()
-                .all(|condition| condition.matches(payload))
+                .all(|condition| condition.matches(payload));
+        
+        tracing::trace!(
+            filter = ?self,
+            payload_keys = ?payload.keys().collect::<Vec<_>>(),
+            result = result,
+            "RETRIEVAL_FILTER: Checking match"
+        );
+        
+        result
+    }
+
+    /// Detailed trace-level debugging for filter failures (call when matches returns false)
+    pub fn trace_match_failure(&self, payload: &Metadata) {
+        let collection_match = self.matches_scalar(payload, "collection", self.collection.as_deref());
+        let user_id_match = self.matches_scalar(payload, "user_id", self.user_id.as_deref());
+        let org_match = self.matches_scalar(payload, "organization_id", self.organization_id.as_deref());
+        let lang_match = self.matches_scalar(payload, "language", self.language.as_deref());
+        let file_match = self.matches_scalar(payload, "file_type", self.file_type.as_deref());
+        let tags_match = self.matches_all_values(payload, "tags", &self.tags);
+        let perms_match = self.matches_any_value(payload, "permissions", &self.permissions);
+        
+        if let Some(expected) = &self.collection {
+            let actual = payload.get("collection");
+            if !collection_match {
+                tracing::trace!(expected = %expected, actual = ?actual, "RETRIEVAL_FILTER: collection mismatch");
+            }
+        }
+        if let Some(expected) = &self.user_id {
+            let actual = payload.get("user_id");
+            if !user_id_match {
+                tracing::trace!(expected = %expected, actual = ?actual, "RETRIEVAL_FILTER: user_id mismatch");
+            }
+        }
+        if let Some(expected) = &self.organization_id {
+            let actual = payload.get("organization_id");
+            if !org_match {
+                tracing::trace!(expected = %expected, actual = ?actual, "RETRIEVAL_FILTER: organization_id mismatch");
+            }
+        }
+        if !self.tags.is_empty() && !tags_match {
+            let actual = payload.get("tags");
+            tracing::trace!(expected = ?self.tags, actual = ?actual, "RETRIEVAL_FILTER: tags mismatch");
+        }
+        if !self.permissions.is_empty() && !perms_match {
+            let actual = payload.get("permissions");
+            tracing::trace!(expected = ?self.permissions, actual = ?actual, "RETRIEVAL_FILTER: permissions mismatch");
+        }
     }
 
     fn matches_scalar(&self, payload: &Metadata, key: &str, expected: Option<&str>) -> bool {

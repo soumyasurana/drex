@@ -1153,6 +1153,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "drex-config",
+ "drex-memory",
  "reqwest",
  "rstest",
  "serde",
@@ -2685,6 +2686,7 @@ dependencies = [
  "serde_json",
  "storage",
  "tokio",
+ "tracing",
  "types",
  "uuid",
 ]
@@ -4238,6 +4240,7 @@ dependencies = [
  "serde_json",
  "storage",
  "tokio",
+ "tracing",
  "types",
  "uuid",
 ]

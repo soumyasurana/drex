@@ -70,7 +70,7 @@ pub struct AppState {
 
     /// The policy-enforcing memory store
     /// This uses a type-erased wrapper to allow different backend configurations
-    pub memory_store: Box<dyn MemoryStore>,
+    pub memory_store: Arc<dyn MemoryStore>,
 
     /// Current operational health status
     pub health: OperationalHealth,
@@ -203,7 +203,7 @@ pub async fn initialize_app_state(
 async fn create_memory_store(
     policy: Arc<RuleBasedPolicy>,
     config: &drex_config::AppConfig,
-) -> Result<Box<dyn MemoryStore>, String> {
+) -> Result<Arc<dyn MemoryStore>, String> {
     // Connect to Qdrant for vector storage
     let vector_store = QdrantVectorStore::connect(&config.qdrant.url, config.qdrant.api_key.clone())
         .map_err(|e| format!("Failed to connect to Qdrant: {}", e))?;
@@ -231,7 +231,7 @@ async fn create_memory_store(
     info!("Memory store created with Qdrant (at {}) and Ollama (at {})",
         config.qdrant.url, config.ollama.base_url);
 
-    Ok(Box::new(drex_memory::PolicyEnforcingStore::new(
+    Ok(Arc::new(drex_memory::PolicyEnforcingStore::new(
         (*policy).clone(),
         raw_store,
     )))

@@ -626,6 +626,10 @@ mod tests {
         async fn update(&self, _memory: LongTermMemory) -> Result<(), ContextraError> {
             Ok(())
         }
+
+        async fn get(&self, id: Uuid) -> Result<Option<LongTermMemory>, ContextraError> {
+            Ok(self.memories.iter().find(|m| m.id == id).cloned())
+        }
     }
 
     #[derive(Debug, Clone)]

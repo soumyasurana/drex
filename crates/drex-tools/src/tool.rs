@@ -9,6 +9,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Input passed to a tool during execution.
 ///
@@ -142,12 +143,24 @@ impl ToolMetadata {
 ///
 /// Capabilities should only be set by the trusted Drex runtime. Tools must
 /// not accept capabilities from model-generated arguments.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct ToolContext {
     /// Arbitrary context data (key-value pairs)
     data: HashMap<String, Value>,
     /// Capabilities granted to this execution
     granted_capabilities: CapabilitySet,
+    /// Optional memory store for tools that need to persist/retrieve memories
+    memory_store: Option<Arc<dyn drex_memory::MemoryStore>>,
+}
+
+impl std::fmt::Debug for ToolContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ToolContext")
+            .field("data", &self.data)
+            .field("granted_capabilities", &self.granted_capabilities)
+            .field("memory_store", &self.memory_store.is_some())
+            .finish()
+    }
 }
 
 impl ToolContext {
@@ -156,6 +169,7 @@ impl ToolContext {
         Self {
             data: HashMap::new(),
             granted_capabilities: CapabilitySet::harmless(),
+            memory_store: None,
         }
     }
 
@@ -164,7 +178,19 @@ impl ToolContext {
         Self {
             data: HashMap::new(),
             granted_capabilities: capabilities,
+            memory_store: None,
         }
+    }
+
+    /// Create a context with a memory store for memory operations.
+    pub fn with_memory_store(mut self, store: Arc<dyn drex_memory::MemoryStore>) -> Self {
+        self.memory_store = Some(store);
+        self
+    }
+
+    /// Get the memory store if available.
+    pub fn memory_store(&self) -> Option<&Arc<dyn drex_memory::MemoryStore>> {
+        self.memory_store.as_ref()
     }
 
     /// Get the capabilities granted to this execution.

@@ -48,6 +48,7 @@ use drex_tools::{
     tool::ToolContext,
     CapabilitySet,
 };
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
@@ -310,7 +311,7 @@ impl Agent {
     pub async fn execute(
         &self,
         request: &str,
-        memory_store: Option<&dyn MemoryStore>,
+        memory_store: Option<Arc<dyn MemoryStore>>,
     ) -> Result<AgentResult, AgentError> {
         info!(request = %request, "Starting agent execution");
 
@@ -322,7 +323,7 @@ impl Agent {
         });
 
         // Step 1: Retrieve context (optional - may fail gracefully)
-        let context = match self.retrieve_context(memory_store, request).await {
+        let context = match self.retrieve_context(&memory_store, request).await {
             Ok(ctx) => {
                 trace.add(TraceEntry::MemoryRetrieved { count: ctx.len() });
                 ctx
@@ -334,7 +335,7 @@ impl Agent {
         };
 
         // Step 2: Generate initial plan
-        let mut plan = self.generate_plan(request, memory_store).await?;
+        let mut plan = self.generate_plan(request, &memory_store).await?;
         state.current_plan = Some(plan.clone());
 
         trace.add(TraceEntry::PlanGenerated {
@@ -416,7 +417,7 @@ impl Agent {
                                     &plan,
                                     &state,
                                     &format!("Tool validation failed: {}", reason),
-                                    memory_store,
+                                    &memory_store,
                                 )
                                 .await;
                             match replan_result {
@@ -438,7 +439,12 @@ impl Agent {
                         tool_name: tool_call.tool_name.clone(),
                     });
 
-                    let context = ToolContext::new();
+                    // Build context with memory store if available
+                    let context = if let Some(ref store) = memory_store {
+                        ToolContext::new().with_memory_store(store.clone())
+                    } else {
+                        ToolContext::new()
+                    };
                     match self.executor.execute(&tool_call, &context).await {
                         Ok(result) => {
                             let success = result.is_success();
@@ -486,7 +492,7 @@ impl Agent {
                                             "Step {} did not succeed as expected",
                                             step.number
                                         ),
-                                        memory_store,
+                                        &memory_store,
                                     )
                                     .await;
                                 match replan_result {
@@ -515,7 +521,7 @@ impl Agent {
                                     &plan,
                                     &state,
                                     &format!("Tool execution failed: {}", e),
-                                    memory_store,
+                                    &memory_store,
                                 )
                                 .await;
                             match replan_result {
@@ -548,7 +554,7 @@ impl Agent {
                             &plan,
                             &state,
                             &format!("Step translation failed: {}", e),
-                            memory_store,
+                            &memory_store,
                         )
                         .await;
                     match replan_result {
@@ -567,20 +573,25 @@ impl Agent {
             state.plan_step_index += 1;
         }
 
-        // Step 5: Write useful information to memory
-        let memories_written = match self
-            .write_memories(&plan, &state, request, &final_response, memory_store)
+        // Step 5: Track memory operations from observations
+        // Count actual memory tool operations (store and retrieve)
+        let memories_written = state.observations.iter().filter(|obs| {
+            obs.tool_name == "memory" && obs.success &&
+            obs.result.get("data").and_then(|d| d.get("memory_id")).is_some()
+        }).count();
+
+        // Write automatic context to memory (for agent's own learning)
+        match self
+            .write_memories(&plan, &state, request, &final_response, &memory_store)
             .await
         {
-            Ok(count) => {
-                trace.add(TraceEntry::MemoryWrite { count });
-                count
+            Ok(_) => {
+                trace.add(TraceEntry::MemoryWrite { count: memories_written });
             }
             Err(e) => {
-                warn!(error = %e, "Failed to write memories");
-                0
+                warn!(error = %e, "Failed to write context memories");
             }
-        };
+        }
 
         // Generate final response if not already set
         if final_response.is_empty() {
@@ -611,7 +622,7 @@ impl Agent {
     /// Retrieve relevant context from memory.
     async fn retrieve_context(
         &self,
-        _memory_store: Option<&dyn MemoryStore>,
+        _memory_store: &Option<Arc<dyn MemoryStore>>,
         _request: &str,
     ) -> Result<Vec<String>, AgentError> {
         // For now, return empty context
@@ -625,11 +636,12 @@ impl Agent {
     async fn generate_plan(
         &self,
         request: &str,
-        memory_store: Option<&dyn MemoryStore>,
+        _memory_store: &Option<Arc<dyn MemoryStore>>,
     ) -> Result<Plan, AgentError> {
         info!("Generating plan...");
+        // For now, don't pass memory_store to planner since it expects different type
         self.planner
-            .plan(request, memory_store)
+            .plan(request, None)
             .await
             .map_err(AgentError::from)
     }
@@ -640,7 +652,7 @@ impl Agent {
         _current_plan: &Plan,
         state: &ExecutionState,
         failure_reason: &str,
-        memory_store: Option<&dyn MemoryStore>,
+        _memory_store: &Option<Arc<dyn MemoryStore>>,
     ) -> Result<Plan, AgentError> {
         warn!(
             reason = %failure_reason,
@@ -664,8 +676,9 @@ impl Agent {
 
         replan_request.push_str("\nPlease create a new plan to accomplish the original goal.");
 
+        // Pass None to planner since it expects different type
         self.planner
-            .plan(&replan_request, memory_store)
+            .plan(&replan_request, None)
             .await
             .map_err(AgentError::from)
     }
@@ -689,60 +702,58 @@ impl Agent {
         Ok(true)
     }
 
-    /// Write useful information back to memory.
+    /// Write user-relevant memories, filtering out agent-internal noise.
+    ///
+    /// Only stores:
+    /// 1. Explicit "Remember:" or "Remember this:" requests from user
+    /// 2. User-stated facts/preferences extracted from request/response
+    ///
+    /// Skips:
+    /// - Plan summaries (agent-internal planning)
+    /// - Tool observations (temporary execution details)
+    /// - Serialized tool outputs (JSON blobs)
     async fn write_memories(
         &self,
-        plan: &Plan,
-        state: &ExecutionState,
+        _plan: &Plan,
+        _state: &ExecutionState,
         request: &str,
-        response: &str,
-        memory_store: Option<&dyn MemoryStore>,
+        _response: &str,
+        memory_store: &Option<Arc<dyn MemoryStore>>,
     ) -> Result<usize, AgentError> {
-        let Some(store) = memory_store else {
+        let Some(store) = memory_store.as_ref() else {
             trace!("No memory store provided, skipping write");
             return Ok(0);
         };
 
         let mut count = 0;
 
-        // Write plan summary (always try, let PolicyContext guide importance)
-        let plan_summary = format!(
-            "Request: {}\nPlan steps: {}\nResponse: {}",
-            request,
-            plan.step_count(),
-            response
-        );
+        // Only store if user explicitly asked to remember something
+        let remember_pattern = Regex::new(r"(?i)remember(?:\s+this)?[:\s]+(.+)").unwrap();
 
-        let memory = Memory::new(MemoryKind::Semantic, &plan_summary)
-            .with_metadata(drex_memory::MemoryMetadata::automatic("drex-agent"))
-            .with_importance(0.7);
+        if let Some(captures) = remember_pattern.captures(request) {
+            let fact = captures.get(1).map(|m| m.as_str().trim()).unwrap_or("");
+            if !fact.is_empty() && !fact.starts_with('{') && !fact.starts_with('[') {
+                let mut metadata = drex_memory::MemoryMetadata::default();
+                metadata.source = drex_memory::MemorySource::Explicit;
+                metadata.confidence = 0.9;
 
-        match store.store(memory).await {
-            Ok(_) => {
-                debug!("Wrote plan summary to memory");
-                count += 1;
-            }
-            Err(e) => {
-                warn!(error = %e, "Failed to write plan memory");
-            }
-        }
+                let memory = Memory::new(MemoryKind::Semantic, fact)
+                    .with_metadata(metadata)
+                    .with_importance(0.9);
 
-        // Write key observations
-        for obs in &state.observations {
-            if obs.success {
-                let obs_content = format!("{}: {:?}", obs.tool_name, obs.result);
-                let memory = Memory::new(MemoryKind::Semantic, &obs_content)
-                    .with_metadata(drex_memory::MemoryMetadata::automatic("drex-agent"))
-                    .with_importance(0.5);
-
-                if let Err(e) = store.store(memory).await {
-                    warn!(error = %e, "Failed to write observation memory");
-                } else {
-                    count += 1;
+                match store.store(memory).await {
+                    Ok(_) => {
+                        debug!("Wrote user-stated memory to store");
+                        count += 1;
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "Failed to write user-stated memory");
+                    }
                 }
             }
         }
 
+        trace!("Wrote {} memories (filtered agent-internal noise)", count);
         Ok(count)
     }
 
@@ -757,7 +768,57 @@ impl Agent {
             return Ok("I've completed the requested task.".to_string());
         }
 
-        // Simple response builder - in production, this might use a model
+        // Check if there's a memory retrieval that returned content
+        for obs in &state.observations {
+            if obs.tool_name == "memory" && obs.success {
+                tracing::info!(
+                    tool_name = %obs.tool_name,
+                    result_keys = ?obs.result.as_object().map(|o| o.keys().collect::<Vec<_>>()),
+                    "AGENT_FINAL_RESPONSE: Processing memory observation"
+                );
+
+                // ExecutionResult is serialized, so data is nested under "data" key
+                if let Some(data) = obs.result.get("data") {
+                    tracing::info!(
+                        data_keys = ?data.as_object().map(|o| o.keys().collect::<Vec<_>>()),
+                        "AGENT_FINAL_RESPONSE: Found data in result"
+                    );
+
+                    // Check for retrieved memories (for retrieve action)
+                    if let Some(memories) = data.get("memories").and_then(|m| m.as_array()) {
+                        tracing::info!(
+                            memories_count = memories.len(),
+                            "AGENT_FINAL_RESPONSE: Found memories array"
+                        );
+
+                        if !memories.is_empty() {
+                            let mut response_parts = Vec::new();
+                            for memory in memories {
+                                if let Some(content) = memory.get("content").and_then(|c| c.as_str()) {
+                                    response_parts.push(content.to_string());
+                                }
+                            }
+                            if !response_parts.is_empty() {
+                                return Ok(response_parts.join("\n\n"));
+                            }
+                        } else {
+                            return Ok("I couldn't find any memories matching your query.".to_string());
+                        }
+                    } else {
+                        tracing::info!("AGENT_FINAL_RESPONSE: No 'memories' field in data");
+                    }
+
+                    // Check for stored memory confirmation
+                    if let Some(content) = data.get("content").and_then(|c| c.as_str()) {
+                        return Ok(format!("I've stored that memory: \"{}\"", content));
+                    }
+                } else {
+                    tracing::info!("AGENT_FINAL_RESPONSE: No 'data' field in result");
+                }
+            }
+        }
+
+        // Default response builder for other tool calls
         let mut response = String::from("Here's what I did:\n\n");
         for obs in &state.observations {
             if obs.success {
@@ -896,4 +957,7 @@ mod tests {
         assert!(json.contains("5"));
         assert!(json.contains("2"));
     }
+
+    // Note: Memory writeback policy tests are in tests/execution_integration_test.rs
+    // The unit tests here would require complex mocking of the MemoryStore trait.
 }
