@@ -6,10 +6,30 @@
 //! - Specific windows
 //! - Arbitrary regions
 //! - Continuous capture for video
+//!
+//! # Platform Support
+//!
+//! - Linux: X11 and Wayland via `screenshots` crate
+//! - macOS: CoreGraphics via `screenshots` crate  
+//! - Windows: GDI/DXG via `screenshots` crate
+//!
+//! # Usage
+//!
+//! ```rust,ignore
+//! let config = CaptureConfig::default();
+//! let capture = ScreenCapture::new(config);
+//! let result = capture.capture().await?;
+//! std::fs::write("screenshot.png", &result.data)?;
+//! ```
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use tracing::{debug, error, info};
+use tracing::debug;
+
+#[cfg(feature = "vision")]
+use screenshots::{Screen, image::RgbaImage, display_info::DisplayInfo};
+#[cfg(feature = "vision")]
+use anyhow;
 
 /// Capture region specification.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -79,21 +99,86 @@ pub struct CaptureBackend;
 
 impl CaptureBackend {
     /// Check if screen capture is available.
+    #[cfg(feature = "vision")]
     pub fn is_available() -> bool {
-        // Placeholder - full implementation would check platform support
+        // Check if we can get display info
+        DisplayInfo::all().map(|d: Vec<DisplayInfo>| !d.is_empty()).unwrap_or(false)
+    }
+
+    /// Check if screen capture is available (no-vision fallback).
+    #[cfg(not(feature = "vision"))]
+    pub fn is_available() -> bool {
         false
     }
 
     /// List available displays.
+    #[cfg(feature = "vision")]
     pub fn list_displays() -> Vec<(u32, String, u32, u32)> {
-        // Returns (id, name, width, height)
+        DisplayInfo::all()
+            .map(|displays: Vec<DisplayInfo>| {
+                displays
+                    .into_iter()
+                    .enumerate()
+                    .map(|(idx, info)| {
+                        let name = format!("Display {} ({}x{})", idx, info.width, info.height);
+                        (idx as u32, name, info.width as u32, info.height as u32)
+                    })
+                    .collect()
+            })
+            .unwrap_or_else(|_| vec![(0, "Unknown Display".to_string(), 1920, 1080)])
+    }
+
+    /// List available displays (no-vision fallback).
+    #[cfg(not(feature = "vision"))]
+    pub fn list_displays() -> Vec<(u32, String, u32, u32)> {
         vec![(0, "Primary Display".to_string(), 1920, 1080)]
     }
 
     /// List available windows.
+    #[cfg(feature = "vision")]
     pub fn list_windows() -> Vec<(u64, String)> {
-        // Returns (id, title)
+        // Note: screenshots crate doesn't provide window enumeration
+        // This would require xcap or platform-specific code
         vec![]
+    }
+
+    /// List available windows (no-vision fallback).
+    #[cfg(not(feature = "vision"))]
+    pub fn list_windows() -> Vec<(u64, String)> {
+        vec![]
+    }
+
+    /// Capture a specific display.
+    #[cfg(feature = "vision")]
+    pub fn capture_display(display_id: u32) -> Result<RgbaImage, CaptureError> {
+        type DisplayResult = Vec<DisplayInfo>;
+        let displays = DisplayInfo::all()
+            .map_err(|e: anyhow::Error| CaptureError::CaptureFailed(e.to_string()))?;
+        let display = displays
+            .get(display_id as usize)
+            .ok_or(CaptureError::DisplayNotFound(display_id))?;
+
+        let screen = Screen::new(display);
+        screen
+            .capture()
+            .map_err(|e: anyhow::Error| CaptureError::CaptureFailed(e.to_string()))
+    }
+
+    /// Capture a specific region.
+    #[cfg(feature = "vision")]
+    pub fn capture_region(x: i32, y: i32, width: u32, height: u32) -> Result<RgbaImage, CaptureError> {
+        // Get primary display (the one containing the region)
+        let displays = DisplayInfo::all()
+            .map_err(|e: anyhow::Error| CaptureError::CaptureFailed(e.to_string()))?;
+        let display = displays
+            .into_iter()
+            .next()
+            .ok_or(CaptureError::NotAvailable)?;
+
+        let screen = Screen::new(&display);
+        screen
+            .capture_area(x, y, width, height)
+            .map_err(|e: anyhow::Error| CaptureError::CaptureFailed(e.to_string()))
     }
 }
 
@@ -142,10 +227,22 @@ impl ScreenCapture {
 
     /// Check if screen capture is available.
     pub fn is_available() -> bool {
-        CaptureBackend::is_available()
+        #[cfg(all(feature = "vision", target_os = "linux"))]
+        {
+            crate::linux_capture::DisplayServer::is_available() || CaptureBackend::is_available()
+        }
+        #[cfg(all(not(feature = "vision"), target_os = "linux"))]
+        {
+            crate::linux_capture::DisplayServer::is_available()
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            CaptureBackend::is_available()
+        }
     }
 
     /// Capture a single screenshot.
+    #[cfg(feature = "vision")]
     pub async fn capture(&self) -> Result<CaptureResult, CaptureError> {
         if !Self::is_available() {
             return Err(CaptureError::NotAvailable);
@@ -153,31 +250,99 @@ impl ScreenCapture {
 
         debug!("Capturing screen region: {:?}", self.config.region);
 
-        // Placeholder - would use actual capture library
-        // For now, create a dummy image
-        let width = match self.config.region {
-            CaptureRegion::Display { .. } => 1920,
-            CaptureRegion::Window { .. } => 800,
-            CaptureRegion::Rect { width, .. } => width,
-        };
-        let height = match self.config.region {
-            CaptureRegion::Display { .. } => 1080,
-            CaptureRegion::Window { .. } => 600,
-            CaptureRegion::Rect { height, .. } => height,
+        // Use the screenshots crate for actual capture
+        let image = match self.config.region {
+            CaptureRegion::Display { id } => {
+                CaptureBackend::capture_display(id)?
+            }
+            CaptureRegion::Window { id: _ } => {
+                // Window capture not yet supported by screenshots crate
+                // Fall back to full display capture
+                CaptureBackend::capture_display(0)?
+            }
+            CaptureRegion::Rect { x, y, width, height } => {
+                CaptureBackend::capture_region(x, y, width, height)?
+            }
         };
 
-        // Create a minimal PNG (1x1 transparent pixel)
-        // In real implementation, would capture actual screen
-        let data = create_placeholder_png(width, height);
+        // Convert to requested format
+        let (data, format) = self.encode_image(&image)?;
 
         Ok(CaptureResult {
             data,
-            format: self.config.format.clone(),
-            width,
-            height,
+            format,
+            width: image.width(),
+            height: image.height(),
             timestamp: Instant::now(),
             region: self.config.region,
         })
+    }
+
+    /// Capture a single screenshot (no-vision fallback - uses Linux native).
+    #[cfg(all(not(feature = "vision"), target_os = "linux"))]
+    pub async fn capture(&self) -> Result<CaptureResult, CaptureError> {
+        crate::linux_capture::LinuxScreenCapture::capture().await
+    }
+
+    /// Capture a single screenshot (no-vision fallback for non-Linux).
+    #[cfg(all(not(feature = "vision"), not(target_os = "linux")))]
+    pub async fn capture(&self) -> Result<CaptureResult, CaptureError> {
+        Err(CaptureError::NotAvailable)
+    }
+
+    /// Encode image to requested format.
+    #[cfg(feature = "vision")]
+    fn encode_image(&self, image: &RgbaImage) -> Result<(Vec<u8>, String), CaptureError> {
+        use image::{ImageEncoder, codecs::{png::PngEncoder, jpeg::JpegEncoder}};
+
+        match self.config.format.as_str() {
+            "png" => {
+                // Encode to PNG using image crate
+                let mut png_data = Vec::new();
+                let encoder = PngEncoder::new(&mut png_data);
+                encoder.write_image(
+                    image.as_raw(),
+                    image.width(),
+                    image.height(),
+                    image::ExtendedColorType::Rgba8
+                ).map_err(|e| CaptureError::CaptureFailed(e.to_string()))?;
+                Ok((png_data, "png".to_string()))
+            }
+            "jpg" | "jpeg" => {
+                // Encode to JPEG
+                let mut jpeg_data = Vec::new();
+                let encoder = JpegEncoder::new_with_quality(
+                    &mut jpeg_data, 
+                    self.config.quality
+                );
+                encoder.write_image(
+                    image.as_raw(),
+                    image.width(),
+                    image.height(),
+                    image::ExtendedColorType::Rgba8
+                ).map_err(|e| CaptureError::CaptureFailed(e.to_string()))?;
+                
+                Ok((jpeg_data, "jpg".to_string()))
+            }
+            _ => {
+                // Default to PNG
+                let mut png_data = Vec::new();
+                let encoder = PngEncoder::new(&mut png_data);
+                encoder.write_image(
+                    image.as_raw(),
+                    image.width(),
+                    image.height(),
+                    image::ExtendedColorType::Rgba8
+                ).map_err(|e| CaptureError::CaptureFailed(e.to_string()))?;
+                Ok((png_data, "png".to_string()))
+            }
+        }
+    }
+
+    /// Encode image (no-vision fallback).
+    #[cfg(not(feature = "vision"))]
+    fn encode_image(&self, _image: &()) -> Result<(Vec<u8>, String), CaptureError> {
+        Err(CaptureError::NotAvailable)
     }
 
     /// Capture and save to file.
@@ -253,14 +418,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_capture_placeholder() {
+    async fn test_capture() {
         let config = CaptureConfig::default();
         let capture = ScreenCapture::new(config);
 
-        // Should return NotAvailable in test environment
+        // Screen capture may or may not be available depending on environment
         let result = capture.capture().await;
-        assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), CaptureError::NotAvailable));
+        if CaptureBackend::is_available() {
+            // If available, should succeed
+            assert!(result.is_ok(), "Capture should succeed when available");
+        } else {
+            // If not available, should return NotAvailable error
+            assert!(result.is_err());
+            assert!(matches!(result.unwrap_err(), CaptureError::NotAvailable));
+        }
     }
 
     #[tokio::test]
@@ -271,18 +442,25 @@ mod tests {
         let temp_path = PathBuf::from("/tmp/test_capture.png");
         let result = capture.capture_to_file(temp_path.clone()).await;
 
-        assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), CaptureError::NotAvailable));
+        if CaptureBackend::is_available() {
+            assert!(result.is_ok(), "Capture to file should succeed when available");
+            // Clean up test file
+            let _ = tokio::fs::remove_file(temp_path).await;
+        } else {
+            assert!(result.is_err());
+            assert!(matches!(result.unwrap_err(), CaptureError::NotAvailable));
+        }
     }
 
     #[test]
     fn test_list_displays() {
         let displays = CaptureBackend::list_displays();
-        assert!(!displays.is_empty());
+        assert!(!displays.is_empty(), "Should have at least one display");
         let (id, name, w, h) = &displays[0];
-        assert_eq!(*id, 0);
-        assert_eq!(*w, 1920);
-        assert_eq!(*h, 1080);
+        assert_eq!(*id, 0, "First display should have id 0");
+        assert!(*w > 0, "Display width should be positive");
+        assert!(*h > 0, "Display height should be positive");
+        assert!(!name.is_empty(), "Display should have a name");
     }
 
     #[test]

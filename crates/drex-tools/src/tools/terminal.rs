@@ -11,6 +11,7 @@ use crate::error::{ToolError, ToolResult};
 use crate::result::ExecutionResult;
 use crate::schema::ToolSchema;
 use crate::tool::{Tool, ToolContext, ToolInput, ToolMetadata};
+use crate::tools::terminal_security::{security_to_tool_error, TerminalSecurityPolicy};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -27,6 +28,8 @@ pub struct TerminalConfig {
     timeout: Duration,
     /// Whether to inherit environment variables
     inherit_env: bool,
+    /// Security policy for command allowlist
+    security_policy: TerminalSecurityPolicy,
 }
 
 impl Default for TerminalConfig {
@@ -34,6 +37,7 @@ impl Default for TerminalConfig {
         Self {
             timeout: Duration::from_secs(30), // 30 second default
             inherit_env: true,
+            security_policy: TerminalSecurityPolicy::new(),
         }
     }
 }
@@ -57,6 +61,16 @@ impl TerminalConfig {
     /// but may break commands that depend on PATH, HOME, etc.
     pub fn inherit_env(mut self, inherit: bool) -> Self {
         self.inherit_env = inherit;
+        self
+    }
+
+    /// Set the security policy (only callable by trusted runtime).
+    ///
+    /// SECURITY: This is the only way to modify the security policy -
+    /// it's NOT exposed in the tool input and can only be set at
+    /// construction time by the trusted Drex runtime.
+    pub fn with_security_policy(mut self, policy: TerminalSecurityPolicy) -> Self {
+        self.security_policy = policy;
         self
     }
 }
@@ -94,18 +108,33 @@ pub struct TerminalExecuteOutput {
 ///
 /// # Security Considerations
 ///
-/// This tool executes arbitrary commands. Security measures:
-/// - Timeout prevents indefinite execution
-/// - Requires terminal.execute capability
-/// - Audit logging of all attempts
-/// - Environment restriction available (config.inherit_env = false)
+/// This tool executes commands with comprehensive security controls:
+/// - **Command Allowlist**: Only commands in the security policy can execute
+/// - **Argument Validation**: Blocks shell operators, subshells, environment expansion
+/// - **Resource Limits**: Enforces timeout, argument count/size limits
+/// - **Capability Required**: Requires terminal.execute capability
+/// - **Audit Logging**: All attempts are logged with sanitization
 ///
-/// # Limitations
+/// # Security Policy
 ///
-/// Environment inheritance is a security concern. Currently:
-/// - Commands inherit the Drex process environment by default
-/// - Setting `inherit_env: false` provides better isolation
-/// - Phase 8 will harden this with explicit env whitelist
+/// The default security policy allows common development tools:
+/// - File system: ls, pwd, cat, head, tail, stat, etc.
+/// - Text processing: echo, printf, grep, awk, sed, etc.
+/// - Version control: git
+/// - Build tools: cargo, rustc
+/// - Network: curl, wget, ping (for testing)
+/// - System info: uname, id, whoami, df, du
+/// - Process: ps, top, sleep
+///
+/// Blocked by default:
+/// - Shell commands: sh, bash, zsh, etc.
+/// - Dangerous tools: eval, exec, source
+/// - Shell operators: ;, |, &&, ||, <, >
+/// - Environment variables: $HOME, ${PATH}, etc.
+/// - Command substitution: $(cmd), `cmd`
+///
+/// To customize the policy, use `TerminalConfig::with_security_policy()`.
+/// This can only be done by the trusted runtime at tool construction time.
 #[derive(Debug, Clone)]
 pub struct TerminalExecuteTool {
     metadata: ToolMetadata,
@@ -262,6 +291,19 @@ impl Tool for TerminalExecuteTool {
                     .collect()
             })
             .unwrap_or_default();
+
+        // Security Policy Validation: Check command against allowlist
+        // This prevents execution of arbitrary commands and shell injection
+        if let Err(e) = self.config.security_policy.validate(command, &args) {
+            let err = security_to_tool_error(e);
+            warn!(
+                tool = self.name(),
+                command = %command,
+                error = %err,
+                "terminal.execute security policy violation - request blocked"
+            );
+            return Err(err);
+        }
 
         // Sanitize for audit log - truncate very long commands
         let audit_command = if command.len() > 100 {

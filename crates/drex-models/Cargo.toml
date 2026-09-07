@@ -29,6 +29,8 @@ thiserror.workspace = true
 
 # Utilities
 chrono = { workspace = true, features = ["serde"] }
+rand = "0.8"
+tracing.workspace = true
 
 drex-config = { path = "../drex-config" }
 

@@ -18,6 +18,8 @@ pub mod capabilities;
 pub mod content;
 pub mod backends;
 pub mod router;
+pub mod quantization;
+pub mod load_balancer;
 
 pub use backend::ModelBackend;
 pub use error::ModelError;
@@ -29,6 +31,14 @@ pub use content::{
     Content, ContentPart, ToolCall, ToolCallResult, ToolDefinition, FunctionDefinition,
 };
 pub use router::{ModelRouter, RouterConfig, TaskKind, RoutingConfig};
+pub use quantization::{
+    QuantizationFormat, QuantizationConfig, QuantizationManager,
+    QuantizedModel, QuantizedModelRegistry, UseCase, MemoryEstimate,
+};
+pub use load_balancer::{
+    LoadBalancer, LoadBalancerConfig, BackendInstance, BackendStatus,
+    LoadBalancingStrategy, LoadBalancerStats, BackendHealth,
+};
 
 /// Re-export common result type for consistency
 pub type Result<T> = std::result::Result<T, ModelError>;

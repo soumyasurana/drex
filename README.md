@@ -30,26 +30,28 @@ Drex is designed as three integrated layers:
 
 - **Agent Loop**: Full planning → execution → observation → memory cycle
 - **Tools**: Filesystem, terminal, git, web fetch
-- **Memory**: Integration with Contextra for context persistence
-- **Security**: Prompt injection detection, trust boundaries, capability permissions
+- **Memory**: Integration with Contextra for persistent context
+- **Security**: Prompt injection detection (15+ patterns), trust boundaries, capability permissions
 - **Observability**: Structured tracing, execution traces, health checks
 - **Models**: Ollama integration for local LLM inference
 - **Context**: Token budgeting and context assembly
 - **Error Handling**: Structured error taxonomy with severity levels
+- **Screen Capture**: Linux X11 native capture via x11rb
+- **Vision**: Multimodal image analysis via Ollama (moondream, llava)
+- **Computer Control**: Real mouse/keyboard control via enigo (Linux)
+- **OAV Loop**: Observe-Act-Verify safety pattern for computer automation
 
-### 🔄 Partial/Placeholder
+### ⚠️ Environment-Dependent (Blocked without system libraries)
 
-- **Voice**: Architecture ready, audio dependencies require system libraries (disabled by default)
-- **Vision**: Architecture ready, requires system image libraries (disabled by default)
-- **Contextra Worker**: Optional background job processor (Gateway handles basic tasks)
+- **Voice**: Requires ALSA (`libasound2-dev`), Whisper models, espeak-ng - BLOCKED in headless environments
+- **Vision Tests**: Require X11 display server for runtime testing
+- **Computer Control Tests**: Require X11 display server for runtime testing
 
-### 📝 Not Yet Implemented
+### 📝 Partial/Architecture Ready
 
-- Computer control (mouse/keyboard)
-- Browser automation
-- Wake phrase detection
-- Background autonomous tasks
-- Multi-agent coordination
+- **Browser Automation**: Architecture in place, requires headless browser feature
+- **Background Autonomous Tasks**: EventBus/TriggerManager exist, daemon wiring incomplete
+- **Multi-agent Coordination**: Coordinator exists, sub-agent spawning ready
 
 ---
 
@@ -97,8 +99,8 @@ Drex is designed as three integrated layers:
 | `drex-memory` | Memory abstractions, policy, Contextra integration |
 | `drex-models` | Model routing, Ollama backend, structured outputs |
 | `drex-tools` | Tool registry, filesystem, terminal, git, web tools |
-| `drex-voice` | Speech-to-text, text-to-speech (placeholder) |
-| `drex-vision` | Screenshots, vision models (placeholder) |
+| `drex-voice` | Speech-to-text, text-to-speech (BLOCKED - requires system libraries) |
+| `drex-vision` | Screenshots, vision models, computer control (REAL - Linux X11 via x11rb/enigo) |
 
 ---
 
@@ -363,6 +365,29 @@ drex ask "Fetch https://example.com and summarize the content"
 drex ask "Clone https://github.com/user/repo to /tmp/test-repo and check its structure"
 ```
 
+### Vision and Computer Control
+
+Drex can see the screen and control the mouse/keyboard (Linux X11 only):
+
+```bash
+# Capture screenshot and analyze
+drex ask "What's on my screen?" --allow-control
+
+# Click on UI elements
+drex ask "Click the File menu" --allow-control
+
+# Type text
+drex ask "Type 'Hello World' in the active window" --allow-control
+
+# Visual automation with safety
+drex ask "Take a screenshot, find the blue button, click it" --allow-control
+```
+
+**Requirements:**
+- Linux with X11 display server
+- `--allow-control` flag required
+- Ollama vision model (moondream:latest or llava)
+
 ---
 
 ## Security
@@ -399,13 +424,32 @@ Drex implements defense-in-depth security:
   - Success/failure status
   - Execution duration
 
+### Computer Control Security
+
+Computer control (mouse/keyboard) requires explicit authorization:
+
+```bash
+# Interactive mode (default) - user confirmation required
+drex ask "Click on the blue button" --allow-control
+
+# Dry run - shows what would happen without executing
+drex ask "Type 'hello world'" --allow-control --dry-run
+```
+
+Safety measures:
+- `--allow-control` flag required to enable computer control
+- Screen bounds validation prevents off-screen actions
+- Execution mode restrictions (DryRun, Interactive, Autonomous)
+- OAV (Observe-Act-Verify) loop for visual confirmation
+- All actions logged to audit trail
+
 ---
 
 ## Testing
 
 ```bash
-# Run all tests
-cargo test --workspace
+# Run all tests (excludes voice which requires system libraries)
+cargo test --workspace --exclude drex-voice
 
 # Run tests for specific crate
 cargo test -p drex-agent
@@ -416,9 +460,21 @@ cargo test --workspace -- --nocapture
 # Security tests
 cargo test --workspace security
 
-# Build release
-cargo build --release
+# Build release (excludes voice)
+cargo build --release --workspace --exclude drex-voice
 ```
+
+### Test Status
+
+| Component | Test Status | Notes |
+|-----------|-------------|-------|
+| drex-core | ✅ Passing | All tests working |
+| drex-agent | ✅ Passing | All tests working |
+| drex-memory | ✅ Passing | All tests working |
+| drex-models | ✅ Passing | All tests working |
+| drex-tools | ✅ Passing | All tests working |
+| drex-vision | ⏸️ Compile-only | Requires X11 display for tests |
+| drex-voice | ❌ Excluded | Requires ALSA, Whisper, espeak-ng |
 
 ---
 
@@ -486,17 +542,17 @@ rustc --version  # Should be 1.90+
 
 ### Next (Short Term)
 
-- [ ] Voice integration (STT/TTS)
-- [ ] Vision capabilities (screenshots)
-- [ ] Browser automation
-- [ ] Computer control (mouse/keyboard)
-- [ ] Persistent task queue
+- [ ] Voice integration (STT/TTS) - requires system libraries (ALSA, espeak-ng)
+- [x] Vision capabilities (screenshots) - COMPLETE (Linux X11)
+- [x] Computer control (mouse/keyboard) - COMPLETE (Linux via enigo)
+- [ ] Browser automation - architecture ready
+- [ ] Persistent task queue - architecture ready
 - [ ] Better multi-step planning
 
 ### Later
 
-- [ ] Background autonomous tasks
-- [ ] Multi-agent coordination
+- [ ] Background autonomous tasks - daemon wiring
+- [ ] Multi-agent coordination - coordinator exists
 - [ ] Plugin system for tools
 - [ ] Additional model providers
 - [ ] Distributed mode

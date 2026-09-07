@@ -51,10 +51,11 @@ rstest = "0.26"
 tempfile = "3"
 temp-env = "0.3"
 regex = "1.10"
-uuid = { version = "1", features = ["v7", "serde"] }
+unicode-normalization = "0.1"
+uuid = { version = "1", features = ["v4", "v7", "serde"] }
 
 # Async runtime
-sqlx = { version = "0.8", features = ["postgres", "runtime-tokio"] }
+sqlx = { version = "0.8", features = ["postgres", "sqlite", "runtime-tokio"] }
 redis = { version = "0.25", features = ["aio", "tokio-comp"] }
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"

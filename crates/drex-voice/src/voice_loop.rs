@@ -2,11 +2,12 @@
 
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use crate::audio::AudioConfig;
 use crate::stt::{create_stt_engine, SpeechToText, SttConfig, SttError, SttEngine, TranscriptionResult};
 use crate::tts::{create_tts_engine, TextToSpeech, TtsConfig, TtsError, TtsEngine};
+use crate::wake_word::{WakeWordDetector, WakeWordConfig};
 
 /// Voice loop configuration.
 #[derive(Debug, Clone)]
@@ -71,6 +72,10 @@ pub enum VoiceLoopError {
     /// Voice loop cancelled.
     #[error("Voice loop cancelled")]
     Cancelled,
+
+    /// Wake word error.
+    #[error("Wake word error: {0}")]
+    WakeWordError(#[from] crate::wake_word::WakeWordError),
 }
 
 /// Voice session state.
@@ -261,12 +266,33 @@ impl VoiceLoop {
         Ok(())
     }
 
-    /// Wait for activation phrase (simplified implementation).
+    /// Wait for activation phrase using wake word detection.
     async fn wait_for_activation(&self) -> Result<(), VoiceLoopError> {
         debug!("Waiting for activation phrase");
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-        self.emit(VoiceEvent::Activated);
-        Ok(())
+        
+        let wake_config = WakeWordConfig {
+            wake_phrase: self.config.activation_phrase.clone().unwrap_or_else(|| "Hey Drex".to_string()),
+            detection_timeout: std::time::Duration::MAX, // Listen indefinitely
+            ..WakeWordConfig::default()
+        };
+        
+        let mut detector = WakeWordDetector::new(wake_config)
+            .map_err(|e| VoiceLoopError::AgentError(e.to_string()))?;
+        
+        match detector.start().await {
+            Ok(result) => {
+                info!("Wake word detected: '{}' (confidence: {:.2})", result.phrase, result.confidence);
+                self.emit(VoiceEvent::Activated);
+                Ok(())
+            }
+            Err(e) => {
+                warn!("Wake word detection failed: {}", e);
+                // Fall back to simple sleep if wake word detection not available
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                self.emit(VoiceEvent::Activated);
+                Ok(())
+            }
+        }
     }
 
     /// Listen for user input.

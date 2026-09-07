@@ -40,6 +40,11 @@ enum Commands {
         /// Don't actually execute, just show what would be done
         #[arg(long)]
         dry_run: bool,
+
+        /// Allow computer control (click, type, screen capture)
+        /// Without this flag, computer control tools are disabled
+        #[arg(long)]
+        allow_control: bool,
     },
 }
 
@@ -50,8 +55,8 @@ async fn main() {
     match cli.command {
         Commands::Health => run_health_check().await,
         Commands::Security => do_security_audit().await,
-        Commands::Ask { request, trace, dry_run } => {
-            run_ask(request.join(" "), trace, dry_run).await
+        Commands::Ask { request, trace, dry_run, allow_control } => {
+            run_ask(request.join(" "), trace, dry_run, allow_control).await
         }
     }
 }
@@ -119,7 +124,7 @@ async fn run_health_check() {
     }
 }
 
-async fn run_ask(request: String, _trace: bool, dry_run: bool) {
+async fn run_ask(request: String, _trace: bool, dry_run: bool, _allow_control: bool) {
     if request.is_empty() {
         eprintln!("Error: request cannot be empty");
         eprintln!("Usage: drex ask '<your request>'");
@@ -218,6 +223,15 @@ async fn run_ask(request: String, _trace: bool, dry_run: bool) {
     tool_registry.register(Box::new(drex_tools::tools::MemoryTool::new()))
         .map_err(|e| eprintln!("Warning: Failed to register memory tool: {}", e)).ok();
 
+    // Register computer control tool with authorization based on --allow-control flag
+    let computer_config = if _allow_control {
+        drex_tools::tools::ComputerControlConfig::new().authorize()
+    } else {
+        drex_tools::tools::ComputerControlConfig::new()
+    };
+    tool_registry.register(Box::new(drex_tools::tools::ComputerControlTool::new(computer_config)))
+        .map_err(|e| eprintln!("Warning: Failed to register computer_control tool: {}", e)).ok();
+
     let tool_registry = Arc::new(tool_registry);
 
     // Check if we have backends registered
@@ -233,6 +247,11 @@ async fn run_ask(request: String, _trace: bool, dry_run: bool) {
     let mut capabilities = drex_tools::CapabilitySet::new();
     capabilities.add(drex_tools::capability::Capability::MemoryRead);
     capabilities.add(drex_tools::capability::Capability::MemoryWrite);
+
+    // Add computer control capability if --allow-control flag is set
+    if _allow_control {
+        capabilities.add(drex_tools::capability::Capability::ComputerControl);
+    }
     let agent_config = AgentConfig::default();
 
     let agent = Agent::new(model_router, tool_registry, capabilities, agent_config);
@@ -325,10 +344,22 @@ mod tests {
     fn cli_parses_ask_command() {
         let cli = Cli::parse_from(["drex", "ask", "hello", "world"]);
         match cli.command {
-            Commands::Ask { request, trace, dry_run } => {
+            Commands::Ask { request, trace, dry_run, allow_control } => {
                 assert_eq!(request, vec!["hello", "world"]);
                 assert!(!trace);
                 assert!(!dry_run);
+                assert!(!allow_control);
+            }
+            _ => panic!("Expected Ask command"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_ask_with_allow_control() {
+        let cli = Cli::parse_from(["drex", "ask", "--allow-control", "hello"]);
+        match cli.command {
+            Commands::Ask { allow_control, .. } => {
+                assert!(allow_control);
             }
             _ => panic!("Expected Ask command"),
         }

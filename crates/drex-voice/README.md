@@ -7,7 +7,45 @@ Speech-to-text and text-to-speech for Drex agent - local, private, offline.
 - **STT**: Whisper-based speech recognition - uses local models, never sends audio to the cloud
 - **TTS**: Local text-to-speech using system voices
 - **Voice Loop**: Continuous conversational mode - listen, process, speak, repeat
+- **Wake Word Detection**: Listen for activation phrases like "Hey Drex" or "Jarvis"
 - **Privacy First**: All processing happens on-device
+
+## Wake Word Detection
+
+The voice system supports always-on wake word detection for hands-free activation:
+
+### Default Wake Words
+
+- "Hey Drex" (primary)
+- "Drex"
+- "Jarvis"
+- "Computer"
+
+### Configuration
+
+```rust
+use drex_voice::wake_word::{WakeWordDetector, WakeWordConfig};
+
+let config = WakeWordConfig {
+    wake_phrase: "Hey Drex".to_string(),
+    alternative_phrases: vec!["Drex".to_string(), "Jarvis".to_string()],
+    vad_threshold: 0.02,  // Energy threshold for speech detection
+    fuzzy_match: true,    // Enable fuzzy matching for imperfect recognition
+    similarity_threshold: 0.7,  // Minimum similarity score (0.0 to 1.0)
+    ..WakeWordConfig::default()
+};
+
+let mut detector = WakeWordDetector::new(config)?;
+let result = detector.start().await?;
+println!("Detected: {} (confidence: {:.2})", result.phrase, result.confidence);
+```
+
+### Features
+
+- **Voice Activity Detection (VAD)**: Energy-based speech detection
+- **Fuzzy Matching**: Tolerates minor variations in pronunciation
+- **Multiple Wake Words**: Configure multiple activation phrases
+- **Low CPU Usage**: Efficient processing when idle
 
 ## Usage
 

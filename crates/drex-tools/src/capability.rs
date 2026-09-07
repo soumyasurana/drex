@@ -35,6 +35,50 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fmt;
 
+/// Execution context type for permission boundaries
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionContext {
+    /// Interactive execution - user is present and approving
+    Interactive,
+    /// Autonomous execution - agent running without direct user oversight
+    Autonomous,
+    /// Background execution - long-running daemon processes
+    Background,
+}
+
+impl Default for ExecutionContext {
+    fn default() -> Self {
+        Self::Interactive
+    }
+}
+
+impl ExecutionContext {
+    /// Get a human-readable description
+    pub fn description(&self) -> &'static str {
+        match self {
+            Self::Interactive => "User-present interactive execution",
+            Self::Autonomous => "Agent autonomous execution",
+            Self::Background => "Background daemon execution",
+        }
+    }
+
+    /// Check if this is an interactive context
+    pub fn is_interactive(&self) -> bool {
+        matches!(self, Self::Interactive)
+    }
+
+    /// Check if this is an autonomous context
+    pub fn is_autonomous(&self) -> bool {
+        matches!(self, Self::Autonomous | Self::Background)
+    }
+
+    /// Check if this is a background context
+    pub fn is_background(&self) -> bool {
+        matches!(self, Self::Background)
+    }
+}
+
 /// A capability represents a permission that Drex can grant to tools.
 ///
 /// Capabilities are strongly typed and organized hierarchically where
@@ -45,33 +89,89 @@ use std::fmt;
 pub enum Capability {
     /// Permission to read files from the filesystem
     FileSystemRead,
-
     /// Permission to write files to the filesystem
     FileSystemWrite,
-
     /// Permission to execute terminal/shell commands
     TerminalExecute,
-
-    /// Permission to make HTTP requests via browser
+    /// Permission to make HTTP requests via browser (external)
     BrowserRequest,
-
+    /// Permission to make HTTP requests to localhost/internal (restricted)
+    BrowserRequestInternal,
     /// Permission to read from the memory store
     MemoryRead,
-
     /// Permission to write to the memory store
     MemoryWrite,
+    /// Permission to execute commands with elevated privileges
+    PrivilegedExecution,
+    /// Permission to modify file/directory permissions
+    PermissionModify,
+    /// Permission to send notifications/alerts
+    NotificationSend,
+    /// Permission to schedule future events
+    EventSchedule,
+    /// Permission to control computer (mouse, keyboard, screen)
+    ComputerControl,
+    /// Permission to capture audio/video
+    MediaCapture,
 }
 
 impl Capability {
+    /// Get the context level required for this capability.
+    ///
+    /// Returns the minimum execution context where this capability is allowed.
+    pub fn min_context(&self) -> ExecutionContext {
+        match self {
+            // Interactive only - user must be present
+            Self::TerminalExecute
+            | Self::PrivilegedExecution
+            | Self::PermissionModify
+            | Self::ComputerControl
+            | Self::MediaCapture => ExecutionContext::Interactive,
+
+            // Autonomous allowed but with restrictions
+            Self::FileSystemWrite | Self::MemoryWrite => ExecutionContext::Autonomous,
+
+            // Background allowed (scheduled tasks)
+            Self::EventSchedule => ExecutionContext::Background,
+
+            // Generally safe for all contexts
+            _ => ExecutionContext::Autonomous,
+        }
+    }
+
+    /// Check if this capability is allowed in autonomous mode.
+    pub fn allowed_in_autonomous(&self) -> bool {
+        self.min_context() != ExecutionContext::Interactive
+    }
+
+    /// Check if this capability requires explicit user confirmation in autonomous mode.
+    pub fn requires_confirmation(&self) -> bool {
+        matches!(
+            self,
+            Self::TerminalExecute
+                | Self::PrivilegedExecution
+                | Self::BrowserRequest
+                | Self::ComputerControl
+                | Self::MediaCapture
+        )
+    }
+
     /// Get a human-readable description of this capability.
     pub fn description(&self) -> &'static str {
         match self {
             Self::FileSystemRead => "Read files from the filesystem",
             Self::FileSystemWrite => "Write files to the filesystem",
             Self::TerminalExecute => "Execute terminal/shell commands",
-            Self::BrowserRequest => "Make HTTP requests via browser",
+            Self::BrowserRequest => "Make HTTP requests to external sites",
+            Self::BrowserRequestInternal => "Make HTTP requests to internal services",
             Self::MemoryRead => "Read from the memory store",
             Self::MemoryWrite => "Write to the memory store",
+            Self::PrivilegedExecution => "Execute with elevated privileges",
+            Self::PermissionModify => "Modify file/directory permissions",
+            Self::NotificationSend => "Send notifications and alerts",
+            Self::EventSchedule => "Schedule future events",
+            Self::ComputerControl => "Control computer (mouse, keyboard, screen)",
+            Self::MediaCapture => "Capture audio and video",
         }
     }
 
@@ -84,8 +184,15 @@ impl Capability {
             Self::FileSystemWrite => "filesystem.write",
             Self::TerminalExecute => "terminal.execute",
             Self::BrowserRequest => "browser.request",
+            Self::BrowserRequestInternal => "browser.request_internal",
             Self::MemoryRead => "memory.read",
             Self::MemoryWrite => "memory.write",
+            Self::PrivilegedExecution => "execution.privileged",
+            Self::PermissionModify => "permission.modify",
+            Self::NotificationSend => "notification.send",
+            Self::EventSchedule => "event.schedule",
+            Self::ComputerControl => "control.computer",
+            Self::MediaCapture => "capture.media",
         }
     }
 
@@ -98,8 +205,15 @@ impl Capability {
             "filesystem.write" => Some(Self::FileSystemWrite),
             "terminal.execute" => Some(Self::TerminalExecute),
             "browser.request" => Some(Self::BrowserRequest),
+            "browser.request_internal" => Some(Self::BrowserRequestInternal),
             "memory.read" => Some(Self::MemoryRead),
             "memory.write" => Some(Self::MemoryWrite),
+            "execution.privileged" => Some(Self::PrivilegedExecution),
+            "permission.modify" => Some(Self::PermissionModify),
+            "notification.send" => Some(Self::NotificationSend),
+            "event.schedule" => Some(Self::EventSchedule),
+            "control.computer" => Some(Self::ComputerControl),
+            "capture.media" => Some(Self::MediaCapture),
             _ => None,
         }
     }
@@ -111,19 +225,64 @@ impl Capability {
 
     /// Check if this capability is dangerous (potentially destructive).
     pub fn is_dangerous(&self) -> bool {
-        matches!(self, Self::FileSystemWrite | Self::TerminalExecute | Self::MemoryWrite)
+        matches!(
+            self,
+            Self::FileSystemWrite
+                | Self::TerminalExecute
+                | Self::MemoryWrite
+                | Self::PrivilegedExecution
+                | Self::PermissionModify
+                | Self::ComputerControl
+        )
     }
 
     /// Get all available capabilities.
     pub fn all() -> &'static [Capability] {
-        &[
-            Self::FileSystemRead,
-            Self::FileSystemWrite,
-            Self::TerminalExecute,
-            Self::BrowserRequest,
-            Self::MemoryRead,
-            Self::MemoryWrite,
-        ]
+        use std::sync::OnceLock;
+        static ALL_CAPS: OnceLock<Vec<Capability>> = OnceLock::new();
+        ALL_CAPS.get_or_init(|| {
+            vec![
+                Self::FileSystemRead,
+                Self::FileSystemWrite,
+                Self::TerminalExecute,
+                Self::BrowserRequest,
+                Self::BrowserRequestInternal,
+                Self::MemoryRead,
+                Self::MemoryWrite,
+                Self::PrivilegedExecution,
+                Self::PermissionModify,
+                Self::NotificationSend,
+                Self::EventSchedule,
+                Self::ComputerControl,
+                Self::MediaCapture,
+            ]
+        })
+    }
+
+    /// Get capabilities allowed for autonomous execution.
+    pub fn autonomous_allowed() -> &'static [Capability] {
+        use std::sync::OnceLock;
+        static AUTO_ALLOWED: OnceLock<Vec<Capability>> = OnceLock::new();
+        AUTO_ALLOWED.get_or_init(|| {
+            Self::all()
+                .iter()
+                .filter(|c| c.allowed_in_autonomous())
+                .copied()
+                .collect()
+        })
+    }
+
+    /// Get capabilities that require interactive execution.
+    pub fn interactive_only() -> &'static [Capability] {
+        use std::sync::OnceLock;
+        static INTERACTIVE: OnceLock<Vec<Capability>> = OnceLock::new();
+        INTERACTIVE.get_or_init(|| {
+            Self::all()
+                .iter()
+                .filter(|c| !c.allowed_in_autonomous())
+                .copied()
+                .collect()
+        })
     }
 }
 
@@ -244,6 +403,49 @@ impl CapabilitySet {
     /// Check if this set contains dangerous capabilities.
     pub fn has_dangerous(&self) -> bool {
         self.capabilities.iter().any(|c| c.is_dangerous())
+    }
+
+    /// Check if this set contains any interactive-only capabilities.
+    pub fn has_interactive_only(&self) -> bool {
+        self.capabilities.iter().any(|c| !c.allowed_in_autonomous())
+    }
+
+    /// Filter capabilities for autonomous execution.
+    ///
+    /// Returns a new CapabilitySet with only capabilities allowed
+    /// in autonomous mode.
+    pub fn for_autonomous(&self) -> Self {
+        Self {
+            capabilities: self
+                .capabilities
+                .iter()
+                .filter(|c| c.allowed_in_autonomous())
+                .copied()
+                .collect(),
+        }
+    }
+
+    /// Filter capabilities for execution context.
+    ///
+    /// Returns a new CapabilitySet with only capabilities allowed
+    /// for the given execution context.
+    pub fn for_context(&self, context: ExecutionContext) -> Self {
+        match context {
+            ExecutionContext::Interactive => self.clone(),
+            ExecutionContext::Autonomous | ExecutionContext::Background => self.for_autonomous(),
+        }
+    }
+
+    /// Get the set of capabilities that require user confirmation.
+    pub fn requiring_confirmation(&self) -> Self {
+        Self {
+            capabilities: self
+                .capabilities
+                .iter()
+                .filter(|c| c.requires_confirmation())
+                .copied()
+                .collect(),
+        }
     }
 }
 
@@ -423,5 +625,147 @@ mod tests {
 
         let safe = CapabilitySet::from(vec![Capability::FileSystemRead]);
         assert!(!safe.has_dangerous());
+    }
+
+    #[test]
+    fn execution_context_default_is_interactive() {
+        let ctx = ExecutionContext::default();
+        assert_eq!(ctx, ExecutionContext::Interactive);
+        assert!(ctx.is_interactive());
+        assert!(!ctx.is_autonomous());
+    }
+
+    #[test]
+    fn execution_context_autonomous_check() {
+        let auto = ExecutionContext::Autonomous;
+        assert!(!auto.is_interactive());
+        assert!(auto.is_autonomous());
+
+        let background = ExecutionContext::Background;
+        assert!(!background.is_interactive());
+        assert!(background.is_autonomous());
+        assert!(background.is_background());
+    }
+
+    #[test]
+    fn capability_min_context_terminal_is_interactive() {
+        assert_eq!(
+            Capability::TerminalExecute.min_context(),
+            ExecutionContext::Interactive
+        );
+        assert_eq!(
+            Capability::ComputerControl.min_context(),
+            ExecutionContext::Interactive
+        );
+    }
+
+    #[test]
+    fn capability_min_context_read_is_autonomous() {
+        assert_eq!(
+            Capability::FileSystemRead.min_context(),
+            ExecutionContext::Autonomous
+        );
+        assert_eq!(
+            Capability::BrowserRequest.min_context(),
+            ExecutionContext::Autonomous
+        );
+    }
+
+    #[test]
+    fn capability_allowed_in_autonomous() {
+        assert!(Capability::FileSystemRead.allowed_in_autonomous());
+        assert!(!Capability::TerminalExecute.allowed_in_autonomous());
+        assert!(!Capability::ComputerControl.allowed_in_autonomous());
+    }
+
+    #[test]
+    fn capability_requires_confirmation() {
+        assert!(Capability::TerminalExecute.requires_confirmation());
+        assert!(Capability::ComputerControl.requires_confirmation());
+        assert!(!Capability::FileSystemRead.requires_confirmation());
+    }
+
+    #[test]
+    fn capability_set_for_autonomous() {
+        let full = CapabilitySet::from(vec![
+            Capability::FileSystemRead,
+            Capability::FileSystemWrite,
+            Capability::TerminalExecute,
+        ]);
+        let auto = full.for_autonomous();
+
+        assert!(auto.has(Capability::FileSystemRead));
+        assert!(auto.has(Capability::FileSystemWrite));
+        assert!(!auto.has(Capability::TerminalExecute));
+    }
+
+    #[test]
+    fn capability_set_for_context_interactive_preserves_all() {
+        let full = CapabilitySet::from(vec![
+            Capability::FileSystemRead,
+            Capability::TerminalExecute,
+        ]);
+        let interactive = full.for_context(ExecutionContext::Interactive);
+
+        assert!(interactive.has(Capability::FileSystemRead));
+        assert!(interactive.has(Capability::TerminalExecute));
+    }
+
+    #[test]
+    fn capability_set_for_context_autonomous_filters() {
+        let full = CapabilitySet::from(vec![
+            Capability::FileSystemRead,
+            Capability::TerminalExecute,
+        ]);
+        let auto = full.for_context(ExecutionContext::Autonomous);
+
+        assert!(auto.has(Capability::FileSystemRead));
+        assert!(!auto.has(Capability::TerminalExecute));
+    }
+
+    #[test]
+    fn capability_set_has_interactive_only() {
+        let interactive = CapabilitySet::from(vec![
+            Capability::FileSystemRead,
+            Capability::TerminalExecute,
+        ]);
+        assert!(interactive.has_interactive_only());
+
+        let auto_only = CapabilitySet::from(vec![
+            Capability::FileSystemRead,
+            Capability::MemoryRead,
+        ]);
+        assert!(!auto_only.has_interactive_only());
+    }
+
+    #[test]
+    fn capability_set_requiring_confirmation() {
+        let mixed = CapabilitySet::from(vec![
+            Capability::FileSystemRead,
+            Capability::TerminalExecute,
+            Capability::BrowserRequest,
+        ]);
+        let confirmation = mixed.requiring_confirmation();
+
+        assert_eq!(confirmation.len(), 2);
+        assert!(confirmation.has(Capability::TerminalExecute));
+        assert!(confirmation.has(Capability::BrowserRequest));
+        assert!(!confirmation.has(Capability::FileSystemRead));
+    }
+
+    #[test]
+    fn capability_autonomous_allowed_list() {
+        let auto_allowed = Capability::autonomous_allowed();
+        assert!(!auto_allowed.contains(&Capability::TerminalExecute));
+        assert!(!auto_allowed.contains(&Capability::ComputerControl));
+        assert!(auto_allowed.contains(&Capability::FileSystemRead));
+    }
+
+    #[test]
+    fn capability_interactive_only_list() {
+        let interactive = Capability::interactive_only();
+        assert!(interactive.contains(&Capability::TerminalExecute));
+        assert!(interactive.contains(&Capability::ComputerControl));
+        assert!(!interactive.contains(&Capability::FileSystemRead));
     }
 }

@@ -26,6 +26,7 @@ chrono = { workspace = true, features = ["serde"] }
 uuid = { workspace = true, features = ["v7", "serde"] }
 tracing.workspace = true
 regex.workspace = true
+unicode-normalization.workspace = true
 
 # Drex dependencies
 drex-config = { path = "../drex-config" }

@@ -319,8 +319,16 @@ impl ComputerController for PlaceholderComputerController {
 /// Type alias for computer controller.
 pub type BoxedController = Arc<dyn ComputerController>;
 
-/// Create a default controller.
+/// Create a default controller (uses real implementation on Linux when available).
 pub fn create_controller(config: ControlConfig) -> Result<BoxedController, ControlError> {
+    #[cfg(all(feature = "enigo", target_os = "linux"))]
+    {
+        // Try to create real controller first
+        if crate::linux_control::EnigoController::is_available() {
+            return crate::linux_control::create_real_controller(config);
+        }
+    }
+    // Fall back to placeholder
     let controller = PlaceholderComputerController::new(config)?;
     Ok(Arc::new(controller))
 }

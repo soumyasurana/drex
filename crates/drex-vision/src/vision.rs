@@ -35,8 +35,9 @@ pub struct VisionConfig {
 impl Default for VisionConfig {
     fn default() -> Self {
         Self {
-            provider: "placeholder".to_string(),
-            model_name: "vision".to_string(),
+            // Default to Ollama with llava model for real vision
+            provider: "ollama".to_string(),
+            model_name: "moondream:latest".to_string(),
             endpoint: None,
             timeout_secs: 30,
             max_tokens: 4096,
@@ -245,10 +246,26 @@ impl VisionModel for PlaceholderVisionModel {
 /// Type alias for vision model.
 pub type BoxedVisionModel = Arc<dyn VisionModel>;
 
-/// Create a default vision model.
+/// Create a vision model based on configuration.
 pub fn create_vision_model(config: VisionConfig) -> Result<BoxedVisionModel, VisionError> {
-    let model = PlaceholderVisionModel::new(config)?;
-    Ok(Arc::new(model))
+    match config.provider.as_str() {
+        #[cfg(feature = "vision")]
+        "ollama" | "moondream" | "llava" => {
+            use crate::ollama_vision::OllamaVisionModel;
+            let model = OllamaVisionModel::new(config)?;
+            Ok(Arc::new(model))
+        }
+        "placeholder" => {
+            let model = PlaceholderVisionModel::new(config)?;
+            Ok(Arc::new(model))
+        }
+        _ => {
+            // Default to Ollama for unknown providers
+            use crate::ollama_vision::OllamaVisionModel;
+            let model = OllamaVisionModel::new(config)?;
+            Ok(Arc::new(model))
+        }
+    }
 }
 
 /// Convert normalized coordinates to absolute pixel coordinates.

@@ -12,7 +12,7 @@ description = "Drex's tool system for discovering and executing capabilities"
 [dependencies]
 # Core async runtime
 async-trait.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["rt", "net", "process"] }
 
 # Serialization (for structured inputs/outputs)
 serde = { workspace = true, features = ["derive"] }
@@ -29,12 +29,20 @@ url = { version = "2.5", features = ["serde"] }
 # HTTP client for web.fetch
 reqwest.workspace = true
 
+# Browser automation via Chrome DevTools Protocol
+chromiumoxide = { version = "0.7", optional = true, features = ["tokio-runtime"] }
+chromiumoxide_fetcher = { version = "0.9", optional = true }
+
 # Logging - important for audit trail
 tracing.workspace = true
 
 # Drex dependencies
 drex-config = { path = "../drex-config" }
 drex-memory = { path = "../drex-memory" }
+
+[features]
+default = []
+browser = ["chromiumoxide", "chromiumoxide_fetcher"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros"] }

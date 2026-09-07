@@ -13,14 +13,21 @@
 //! may not be available in all environments.
 
 pub mod audio;
+pub mod audio_processing;
 pub mod stt;
 pub mod tts;
 pub mod voice_loop;
+pub mod wake_word;
 
 pub use audio::{AudioConfig, AudioError, AudioSample, AudioBuffer};
+pub use audio_processing::{
+    AudioProcessor, AudioProcessingConfig, VadConfig, VadResult, 
+    ProcessedAudio, AudioQuality, resample_linear, detect_clipping,
+};
 pub use stt::{SttConfig, SttError, TranscriptionResult, create_stt_engine, SttEngine, SpeechToText};
 pub use tts::{TtsConfig, TtsError, SpeakResult, create_tts_engine, TtsEngine, TextToSpeech};
 pub use voice_loop::{VoiceLoop, VoiceLoopConfig, VoiceLoopError, VoiceSession, create_voice_loop};
+pub use wake_word::{WakeWordDetector, WakeWordConfig, WakeWordError, WakeWordResult, DetectorState};
 
 /// Version of the voice crate.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

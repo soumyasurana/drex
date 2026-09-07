@@ -35,6 +35,15 @@ pub mod coordinate;
 pub mod control;
 pub mod observe_act_verify;
 
+#[cfg(feature = "vision")]
+pub mod ollama_vision;
+
+#[cfg(all(feature = "vision", target_os = "linux"))]
+pub mod linux_capture;
+
+#[cfg(all(feature = "enigo", target_os = "linux"))]
+pub mod linux_control;
+
 pub use capture::{ScreenCapture, CaptureConfig, CaptureResult, CaptureRegion, CaptureError};
 pub use vision::{VisionModel, VisionConfig, VisionResult, VisionError, ElementDescription};
 pub use coordinate::{CoordinateMapper, CoordinateConfig, CoordinateError, ScreenCoordinate};

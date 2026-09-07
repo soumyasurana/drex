@@ -20,6 +20,7 @@ use crate::error::{ToolError, ToolResult};
 use crate::result::ExecutionResult;
 use crate::schema::ToolSchema;
 use crate::tool::{Tool, ToolContext, ToolInput, ToolMetadata};
+use crate::tools::web_security::{ssrf_to_tool_error, validate_url_ssrf, SsrfConfig};
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -326,15 +327,21 @@ impl Tool for WebFetchTool {
             "web.fetch attempted"
         );
 
-        // Validate URL scheme
-        if let Err(e) = validate_url(url) {
+        // SSRF Protection: Validate URL with DNS resolution and IP blocking
+        // This prevents attacks like:
+        // - Accessing internal services (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)
+        // - Accessing cloud metadata (169.254.169.254 - AWS/GCP/Azure)
+        // - DNS rebinding attacks (short TTL to bypass initial checks)
+        let ssrf_config = SsrfConfig::new();
+        if let Err(e) = validate_url_ssrf(url, &ssrf_config).await {
+            let err = ssrf_to_tool_error(e);
             warn!(
                 tool = self.name(),
                 url_requested = %sanitized_url,
-                error = %e,
-                "URL validation failed"
+                error = %err,
+                "SSRF validation failed - request blocked"
             );
-            return Err(e);
+            return Err(err);
         }
 
         // Execute fetch
@@ -407,7 +414,10 @@ mod tests {
         let result = tool.execute(&ToolContext::new(), input).await;
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("file:// URLs are not allowed"));
+        // SSRF validation now rejects file:// - error contains scheme name
+        let err_str = result.unwrap_err().to_string();
+        assert!(err_str.contains("'file'") || err_str.contains("file"),
+            "Expected file:// to be rejected, got: {}", err_str);
     }
 
     #[tokio::test]
@@ -419,7 +429,10 @@ mod tests {
         let result = tool.execute(&ToolContext::new(), input).await;
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("not supported"));
+        // SSRF validation now rejects ftp:// - error contains scheme name
+        let err_str = result.unwrap_err().to_string();
+        assert!(err_str.contains("'ftp'") || err_str.contains("ftp"),
+            "Expected ftp:// to be rejected, got: {}", err_str);
     }
 
     #[tokio::test]
@@ -507,5 +520,76 @@ mod tests {
             ).unwrap();
             assert_eq!(output.status, 404);
         }
+    }
+
+    // SSRF Protection Tests - Integration tests for web.fetch
+    #[tokio::test]
+    async fn web_fetch_blocks_private_ip() {
+        let config = WebFetchConfig::new();
+        let tool = WebFetchTool::new(config);
+
+        let input = ToolInput::from_json(json!({"url": "http://192.168.1.1/"})).unwrap();
+        let result = tool.execute(&ToolContext::new(), input).await;
+
+        assert!(result.is_err());
+        let err_str = result.unwrap_err().to_string();
+        assert!(err_str.contains("blocked") || err_str.contains("private"),
+            "Expected private IP to be blocked, got: {}", err_str);
+    }
+
+    #[tokio::test]
+    async fn web_fetch_blocks_loopback() {
+        let config = WebFetchConfig::new();
+        let tool = WebFetchTool::new(config);
+
+        let input = ToolInput::from_json(json!({"url": "http://127.0.0.1:8080/admin"})).unwrap();
+        let result = tool.execute(&ToolContext::new(), input).await;
+
+        assert!(result.is_err());
+        let err_str = result.unwrap_err().to_string();
+        assert!(err_str.contains("blocked") || err_str.contains("loopback"),
+            "Expected loopback IP to be blocked, got: {}", err_str);
+    }
+
+    #[tokio::test]
+    async fn web_fetch_blocks_metadata_endpoint() {
+        let config = WebFetchConfig::new();
+        let tool = WebFetchTool::new(config);
+
+        let input = ToolInput::from_json(json!({"url": "http://169.254.169.254/latest/meta-data/"})).unwrap();
+        let result = tool.execute(&ToolContext::new(), input).await;
+
+        assert!(result.is_err());
+        let err_str = result.unwrap_err().to_string();
+        assert!(err_str.contains("metadata") || err_str.contains("blocked"),
+            "Expected metadata endpoint to be blocked, got: {}", err_str);
+    }
+
+    #[tokio::test]
+    async fn web_fetch_blocks_localhost_hostname() {
+        let config = WebFetchConfig::new();
+        let tool = WebFetchTool::new(config);
+
+        let input = ToolInput::from_json(json!({"url": "http://localhost:3000/api"})).unwrap();
+        let result = tool.execute(&ToolContext::new(), input).await;
+
+        assert!(result.is_err());
+        let err_str = result.unwrap_err().to_string();
+        assert!(err_str.contains("metadata") || err_str.contains("blocked"),
+            "Expected localhost hostname to be blocked, got: {}", err_str);
+    }
+
+    #[tokio::test]
+    async fn web_fetch_blocks_10_private_range() {
+        let config = WebFetchConfig::new();
+        let tool = WebFetchTool::new(config);
+
+        let input = ToolInput::from_json(json!({"url": "http://10.0.0.1/internal"})).unwrap();
+        let result = tool.execute(&ToolContext::new(), input).await;
+
+        assert!(result.is_err());
+        let err_str = result.unwrap_err().to_string();
+        assert!(err_str.contains("blocked") || err_str.contains("private"),
+            "Expected 10.x.x.x range to be blocked, got: {}", err_str);
     }
 }
