@@ -243,12 +243,17 @@ async fn run_ask(request: String, _trace: bool, dry_run: bool, _allow_control: b
         std::process::exit(1);
     }
 
-    // Grant memory capabilities for memory tool usage
+    // Grant capabilities for interactive execution
+    // These match the tools registered above for normal interactive use
     let mut capabilities = drex_tools::CapabilitySet::new();
     capabilities.add(drex_tools::capability::Capability::MemoryRead);
     capabilities.add(drex_tools::capability::Capability::MemoryWrite);
+    capabilities.add(drex_tools::capability::Capability::FileSystemRead);
+    capabilities.add(drex_tools::capability::Capability::TerminalExecute);
+    capabilities.add(drex_tools::capability::Capability::BrowserRequest);
 
     // Add computer control capability if --allow-control flag is set
+    // This is a dangerous capability that requires explicit user authorization
     if _allow_control {
         capabilities.add(drex_tools::capability::Capability::ComputerControl);
     }

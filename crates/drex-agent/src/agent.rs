@@ -768,67 +768,124 @@ impl Agent {
             return Ok("I've completed the requested task.".to_string());
         }
 
-        // Check if there's a memory retrieval that returned content
+        // Build response from observations in order
+        let mut response_parts = Vec::new();
+
         for obs in &state.observations {
-            if obs.tool_name == "memory" && obs.success {
-                tracing::info!(
-                    tool_name = %obs.tool_name,
-                    result_keys = ?obs.result.as_object().map(|o| o.keys().collect::<Vec<_>>()),
-                    "AGENT_FINAL_RESPONSE: Processing memory observation"
-                );
+            if !obs.success {
+                response_parts.push(format!("Step {} ({}): failed", obs.step_number, obs.tool_name));
+                continue;
+            }
 
-                // ExecutionResult is serialized, so data is nested under "data" key
-                if let Some(data) = obs.result.get("data") {
-                    tracing::info!(
-                        data_keys = ?data.as_object().map(|o| o.keys().collect::<Vec<_>>()),
-                        "AGENT_FINAL_RESPONSE: Found data in result"
-                    );
+            match obs.tool_name.as_str() {
+                "filesystem.read" => {
+                    // Extract file content from filesystem.read result
+                    if let Some(data) = obs.result.get("data") {
+                        if let Some(content) = data.get("content").and_then(|c| c.as_str()) {
+                            // Get the file path being read
+                            let file_path = data.get("path")
+                                .and_then(|p| p.as_str())
+                                .map(|s| s.to_string())
+                                .or_else(|| {
+                                    // Extract path from result structure
+                                    obs.result.get("path")
+                                        .and_then(|p| p.as_str())
+                                        .map(|s| s.to_string())
+                                })
+                                .unwrap_or_else(|| "file".to_string());
 
-                    // Check for retrieved memories (for retrieve action)
-                    if let Some(memories) = data.get("memories").and_then(|m| m.as_array()) {
-                        tracing::info!(
-                            memories_count = memories.len(),
-                            "AGENT_FINAL_RESPONSE: Found memories array"
-                        );
+                            // Generate a natural language response instead of just dumping content
+                            // For shorter files, include full content with context
+                            // For longer files, provide a preview with line count
+                            let line_count = content.lines().count();
+                            let char_count = content.len();
 
-                        if !memories.is_empty() {
-                            let mut response_parts = Vec::new();
-                            for memory in memories {
-                                if let Some(content) = memory.get("content").and_then(|c| c.as_str()) {
-                                    response_parts.push(content.to_string());
+                            if content.len() <= 2000 {
+                                // Shorter file - provide full content with context
+                                response_parts.push(format!(
+                                    "I read the {} file for you. Here's what it contains:\n\n```\n{}\n```",
+                                    file_path, content
+                                ));
+                            } else {
+                                // Longer file - provide meaningful preview
+                                let preview_lines: Vec<&str> = content.lines().take(50).collect();
+                                let preview = preview_lines.join("\n");
+                                let remaining_lines_str = if line_count > 50 {
+                                    format!(", {} more lines", line_count - 50)
+                                } else {
+                                    "".to_string()
+                                };
+
+                                response_parts.push(format!(
+                                    "I read the {} file ({} lines, {} characters). Here's the beginning:\n\n```\n{}\n```\n\n[...{}]",
+                                    file_path, line_count, char_count, preview, remaining_lines_str
+                                ));
+                            }
+                        } else if let Some(error) = data.get("error").and_then(|e| e.as_str()) {
+                            response_parts.push(format!("I couldn't read the file: {}", error));
+                        } else {
+                            response_parts.push("The file was read successfully but no content was returned.".to_string());
+                        }
+                    }
+                }
+                "terminal.execute" => {
+                    if let Some(data) = obs.result.get("data") {
+                        let stdout = data.get("stdout").and_then(|s| s.as_str()).unwrap_or("");
+                        let stderr = data.get("stderr").and_then(|s| s.as_str()).unwrap_or("");
+                        if !stdout.is_empty() {
+                            response_parts.push(format!("Command output:\n```\n{}\n```", stdout));
+                        }
+                        if !stderr.is_empty() {
+                            response_parts.push(format!("Stderr:\n```\n{}\n```", stderr));
+                        }
+                    }
+                }
+                "memory" => {
+                    // Handle memory tool results
+                    if let Some(data) = obs.result.get("data") {
+                        // Check for retrieved memories
+                        if let Some(memories) = data.get("memories").and_then(|m| m.as_array()) {
+                            if !memories.is_empty() {
+                                let mut memory_parts = Vec::new();
+                                for memory in memories {
+                                    if let Some(content) = memory.get("content").and_then(|c| c.as_str()) {
+                                        memory_parts.push(content.to_string());
+                                    }
+                                }
+                                if !memory_parts.is_empty() {
+                                    response_parts.push(memory_parts.join("\n\n"));
                                 }
                             }
-                            if !response_parts.is_empty() {
-                                return Ok(response_parts.join("\n\n"));
-                            }
-                        } else {
-                            return Ok("I couldn't find any memories matching your query.".to_string());
+                        } else if let Some(content) = data.get("content").and_then(|c| c.as_str()) {
+                            response_parts.push(format!("Memory stored: {}", content));
                         }
-                    } else {
-                        tracing::info!("AGENT_FINAL_RESPONSE: No 'memories' field in data");
                     }
-
-                    // Check for stored memory confirmation
-                    if let Some(content) = data.get("content").and_then(|c| c.as_str()) {
-                        return Ok(format!("I've stored that memory: \"{}\"", content));
+                }
+                "web.fetch" => {
+                    if let Some(data) = obs.result.get("data") {
+                        if let Some(text) = data.get("text").and_then(|t| t.as_str()) {
+                            let preview = if text.len() > 2000 {
+                                format!("{}\n\n[Content truncated, {} total characters]", 
+                                    &text[..2000], text.len())
+                            } else {
+                                text.to_string()
+                            };
+                            response_parts.push(format!("Web content:\n\n{}", preview));
+                        }
                     }
-                } else {
-                    tracing::info!("AGENT_FINAL_RESPONSE: No 'data' field in result");
+                }
+                _ => {
+                    // For other tools, just note completion
+                    response_parts.push(format!("Step {}: {} completed", obs.step_number, obs.tool_name));
                 }
             }
         }
 
-        // Default response builder for other tool calls
-        let mut response = String::from("Here's what I did:\n\n");
-        for obs in &state.observations {
-            if obs.success {
-                response.push_str(&format!("✓ Step {}: {} completed\n", obs.step_number, obs.tool_name));
-            } else {
-                response.push_str(&format!("✗ Step {}: {} failed\n", obs.step_number, obs.tool_name));
-            }
+        if response_parts.is_empty() {
+            Ok("I've completed the requested task.".to_string())
+        } else {
+            Ok(response_parts.join("\n\n"))
         }
-
-        Ok(response)
     }
 
     /// Get the current agent trace.
@@ -960,4 +1017,124 @@ mod tests {
 
     // Note: Memory writeback policy tests are in tests/execution_integration_test.rs
     // The unit tests here would require complex mocking of the MemoryStore trait.
+
+    /// Regression test: filesystem.read observation should be rendered with content.
+    #[tokio::test]
+    async fn generate_final_response_includes_filesystem_content() {
+        let agent = create_test_agent(&tempfile::tempdir().unwrap());
+        let mut state = ExecutionState::new();
+        
+        // Add a filesystem.read observation with content
+        state.add_observation(Observation {
+            step_number: 1,
+            tool_name: "filesystem.read".to_string(),
+            success: true,
+            result: serde_json::json!({
+                "data": {
+                    "content": "This is the README content",
+                    "path": "README.md"
+                }
+            }),
+            error: None,
+        });
+
+        let plan = Plan::new("Read README.md");
+        let response = agent.generate_final_response(&plan, &state).await.unwrap();
+        
+        assert!(response.contains("README.md"), "Response should mention the file");
+        assert!(response.contains("This is the README content"), "Response should include actual file content");
+    }
+
+    /// Regression test: terminal output should be rendered.
+    #[tokio::test]
+    async fn generate_final_response_includes_terminal_output() {
+        let agent = create_test_agent(&tempfile::tempdir().unwrap());
+        let mut state = ExecutionState::new();
+        
+        state.add_observation(Observation {
+            step_number: 1,
+            tool_name: "terminal.execute".to_string(),
+            success: true,
+            result: serde_json::json!({
+                "data": {
+                    "stdout": "output from command",
+                    "stderr": ""
+                }
+            }),
+            error: None,
+        });
+
+        let plan = Plan::new("Run command");
+        let response = agent.generate_final_response(&plan, &state).await.unwrap();
+        
+        assert!(response.contains("Command output:"), "Response should indicate command output");
+        assert!(response.contains("output from command"), "Response should include stdout");
+    }
+
+    /// Regression test: raw tool calls should NOT appear in final response.
+    #[tokio::test]
+    async fn generate_final_response_does_not_contain_raw_tool_calls() {
+        let agent = create_test_agent(&tempfile::tempdir().unwrap());
+        let mut state = ExecutionState::new();
+        
+        // Simulate filesystem.read followed by what might be a malformed step
+        state.add_observation(Observation {
+            step_number: 1,
+            tool_name: "filesystem.read".to_string(),
+            success: true,
+            result: serde_json::json!({
+                "data": {
+                    "content": "File contents here",
+                    "path": "file.txt"
+                }
+            }),
+            error: None,
+        });
+
+        let plan = Plan::new("Read file");
+        let response = agent.generate_final_response(&plan, &state).await.unwrap();
+        
+        // The response should NOT look like a raw tool call
+        assert!(!response.contains("retrieve({"), "Response should not contain raw tool call syntax");
+        assert!(!response.contains(" \"{"), "Response should not contain JSON-like tool call patterns");
+    }
+
+    /// Regression test: empty observations should provide helpful message.
+    #[tokio::test]
+    async fn generate_final_response_empty_observations() {
+        let agent = create_test_agent(&tempfile::tempdir().unwrap());
+        let state = ExecutionState::new();
+        
+        let plan = Plan::new("Do something");
+        let response = agent.generate_final_response(&plan, &state).await.unwrap();
+        
+        assert!(response.contains("completed"), "Should acknowledge task completion");
+    }
+
+    /// Test that file content truncation works for large files.
+    #[tokio::test]
+    async fn generate_final_response_truncates_large_files() {
+        let agent = create_test_agent(&tempfile::tempdir().unwrap());
+        let mut state = ExecutionState::new();
+        
+        let large_content = "x".repeat(3000);
+        state.add_observation(Observation {
+            step_number: 1,
+            tool_name: "filesystem.read".to_string(),
+            success: true,
+            result: serde_json::json!({
+                "data": {
+                    "content": large_content,
+                    "path": "large.txt"
+                }
+            }),
+            error: None,
+        });
+
+        let plan = Plan::new("Read large file");
+        let response = agent.generate_final_response(&plan, &state).await.unwrap();
+        
+        assert!(response.contains("beginning"), "Should indicate content was truncated with beginning section");
+        assert!(response.contains("3000 characters"), "Should show original content size");
+    }
 }

@@ -278,29 +278,34 @@ pub async fn plan(
             "Create a plan with numbered steps using the available tools.\n\n",
         );
 
-        prompt.push_str("Available tools and their use:\n");
-        prompt.push_str("- echo({\"message\": \"<text>\"}) - For testing or echoing information\n");
-        prompt.push_str("- filesystem.read({\"path\": \"<file_path>\"}) - To read a file\n");
-        prompt.push_str("- terminal.execute({\"command\": \"<cmd>\"}) - To run shell commands\n");
-        prompt.push_str("- git.status({\"path\": \"<path>\"}) - To check git repository status\n");
-        prompt.push_str("- git.diff({\"path\": \"<path>\"}) - To see git changes\n");
-        prompt.push_str("- web.fetch({\"url\": \"<url>\"}) - To fetch web pages\n");
-        prompt.push_str("- memory({\"action\": \"store\", \"content\": \"<text>\"}) - To store a memory\n");
-        prompt.push_str("- memory({\"action\": \"retrieve\", \"content\": \"<query>\"}) - To retrieve memories\n\n");
+        prompt.push_str("IMPORTANT - YOU MUST ONLY USE THESE EXACT TOOL NAMES:\n");
+        prompt.push_str("- echo({\"message\": \"<text>\"}) - Echo text back (for testing)\n");
+        prompt.push_str("- filesystem.read({\"path\": \"<file_path>\"}) - Read contents of a file\n");
+        prompt.push_str("- terminal.execute({\"command\": \"<cmd>\"}) - Execute a shell command\n");
+        prompt.push_str("- git.status({\"path\": \"<path>\"}) - Check git repository status\n");
+        prompt.push_str("- git.diff({\"path\": \"<path>\"}) - Show git diff for a path\n");
+        prompt.push_str("- web.fetch({\"url\": \"<url>\"}) - Fetch content from a URL\n");
+        prompt.push_str("- memory({\"action\": \"store\", \"content\": \"<text>\"}) - Store information to memory\n");
+        prompt.push_str("- memory({\"action\": \"retrieve\", \"content\": \"<query>\"}) - Search and retrieve from memory\n\n");
+
+        prompt.push_str("CRITICAL RULES:\n");
+        prompt.push_str("1. The tool NAME is what comes before the ( - ONLY use: echo, filesystem.read, terminal.execute, git.status, git.diff, web.fetch, memory\n");
+        prompt.push_str("2. 'retrieve' and 'store' are NOT tool names - they are VALUES for the 'action' parameter of the 'memory' tool\n");
+        prompt.push_str("3. CORRECT: memory({\"action\": \"retrieve\", \"content\": \"query\"})\n");
+        prompt.push_str("4. WRONG: retrieve({\"query\": \"...\"}) - this tool does not exist!\n\n");
 
         prompt.push_str(
-            "If this is a simple question that doesn't require multiple steps, simply provide the answer directly.\n\n",
+            "If this is a simple question that can be answered directly without tools, provide the answer directly.\n\n",
         );
 
-        prompt.push_str("IMPORTANT: Return your response in this exact format:\n\n");
+        prompt.push_str("Return your response in EXACTLY one of these formats:\n\n");
 
-        prompt.push_str("FORMAT 1 - For multi-step tasks (use tool call syntax):\n");
-        prompt.push_str("Step 1: call tool_name({\"param\": \"value\"})\n");
-        prompt.push_str("Step 2: call another_tool({\"param\": \"value\"})\n");
-        prompt.push_str("...and so on\n\n");
+        prompt.push_str("FORMAT 1 - Multi-step task with tools:\n");
+        prompt.push_str("Step 1: tool_name({\"param\": \"value\"})\n");
+        prompt.push_str("Step 2: another_tool({\"param\": \"value\"})\n\n");
 
-        prompt.push_str("FORMAT 2 - For direct answers:\n");
-        prompt.push_str("ANSWER: <your direct response>\n\n");
+        prompt.push_str("FORMAT 2 - Direct answer (no tools needed):\n");
+        prompt.push_str("ANSWER: <your response here>\n\n");
 
         prompt.push_str("Begin your response:\n");
 

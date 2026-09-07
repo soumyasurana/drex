@@ -180,6 +180,19 @@ impl StepExecutor {
             return StepTranslation::ToolCall(tool_call);
         }
 
+        // Check if it looks like a failed tool call attempt (has tool syntax but unknown tool)
+        if self.looks_like_tool_call(description) {
+            // Something that looks like a tool call but wasn't recognized
+            let available_tools: Vec<String> = 
+                self.registry.list_names().map(|s| s.to_string()).collect();
+            return StepTranslation::Error(ExecutionError::ParseError(format!(
+                "Unknown tool in step {}: '{}'. Available tools: {}",
+                step.number,
+                description,
+                available_tools.join(", ")
+            )));
+        }
+
         // If the step looks like a question/answer, treat as direct
         if self.is_direct_answer(description) {
             return StepTranslation::DirectAnswer(description.to_string());
@@ -190,6 +203,25 @@ impl StepExecutor {
             "Could not parse step {} as tool call: {}",
             step.number, description
         )))
+    }
+
+    /// Check if text looks like a tool call attempt (has tool-like syntax).
+    fn looks_like_tool_call(&self, text: &str) -> bool {
+        // Pattern: word({...}) or word({...}) - looks like tool_name({params})
+        // Also catches: retrieve({...}), search({...}), etc.
+        let trimmed = text.trim();
+        
+        // Check for pattern: word({ followed by })
+        if let Some(open_paren) = trimmed.find('(') {
+            if let Some(json_start) = trimmed.find('{') {
+                // Has both ( and { which is tool-like syntax
+                if json_start > open_paren || trimmed[..json_start].contains('(') {
+                    return trimmed.contains('}') && trimmed.contains(')');
+                }
+            }
+        }
+        
+        false
     }
 
     /// Parse explicit tool call syntax like "filesystem.read({path: '/foo'})".
@@ -693,5 +725,103 @@ mod tests {
 
         assert_eq!(tc.tool_name, "echo");
         assert_eq!(tc.rationale, Some("Testing the echo tool".to_string()));
+    }
+
+    /// Regression test: Tool-like strings that aren't registered should NOT be treated as direct answers.
+    #[test]
+    fn looks_like_tool_call_detects_tool_syntax() {
+        let registry = ToolRegistry::new();
+        let executor = StepExecutor::new(Arc::new(registry), CapabilitySet::new());
+
+        // Should detect tool-like syntax
+        assert!(executor.looks_like_tool_call("retrieve({\"query\": \"test\"})"));
+        assert!(executor.looks_like_tool_call("search({\"term\": \"foo\"})"));
+        assert!(executor.looks_like_tool_call("  unknown({})  "));
+
+        // Should NOT detect non-tool-like text
+        assert!(!executor.looks_like_tool_call("This is a direct answer"));
+        assert!(!executor.looks_like_tool_call("The answer is 42"));
+        assert!(!executor.looks_like_tool_call("Call me later")); // 'Call' alone doesn't make it tool-like
+        assert!(!executor.looks_like_tool_call("Use this method")); // 'Use' alone doesn't make it tool-like
+    }
+
+    /// Regression test: Unknown tools should produce error, NOT direct answer.
+    /// This prevents raw tool calls from leaking through as responses.
+    #[test]
+    fn translate_step_rejects_unknown_tools() {
+        let mut registry = ToolRegistry::new();
+        // Register only echo tool
+        registry.register(Box::new(EchoTool::new())).unwrap();
+
+        let executor = StepExecutor::new(Arc::new(registry), CapabilitySet::new());
+
+        let step = PlanStep {
+            number: 1,
+            description: "retrieve({\"query\": \"test\"})".to_string(),
+            rationale: None,
+        };
+
+        let translation = executor.translate_step(&step);
+
+        // Should be an error, NOT a DirectAnswer
+        match translation {
+            StepTranslation::Error(_) => {
+                // This is the expected behavior - unknown tool should error
+            }
+            StepTranslation::DirectAnswer(ans) => {
+                panic!("Unknown tool should NOT become a direct answer, got: {}", ans);
+            }
+            StepTranslation::ToolCall(_) => {
+                panic!("Unknown tool should NOT be parsed as tool call");
+            }
+        }
+    }
+
+    /// Test that known tools are still parsed correctly.
+    #[test]
+    fn translate_step_accepts_known_tools() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(EchoTool::new())).unwrap();
+
+        let executor = StepExecutor::new(Arc::new(registry), CapabilitySet::new());
+
+        let step = PlanStep {
+            number: 1,
+            description: "echo({\"message\": \"hello\"})".to_string(),
+            rationale: None,
+        };
+
+        let translation = executor.translate_step(&step);
+
+        match translation {
+            StepTranslation::ToolCall(tc) => {
+                assert_eq!(tc.tool_name, "echo");
+            }
+            _ => panic!("Known tool should be parsed as ToolCall"),
+        }
+    }
+
+    /// Test that direct answers are still recognized.
+    #[test]
+    fn translate_step_recognizes_direct_answers() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(EchoTool::new())).unwrap();
+
+        let executor = StepExecutor::new(Arc::new(registry), CapabilitySet::new());
+
+        let step = PlanStep {
+            number: 1,
+            description: "ANSWER: The answer is 42".to_string(),
+            rationale: None,
+        };
+
+        let translation = executor.translate_step(&step);
+
+        match translation {
+            StepTranslation::DirectAnswer(ans) => {
+                assert!(ans.contains("42"));
+            }
+            _ => panic!("Direct answer should be recognized"),
+        }
     }
 }

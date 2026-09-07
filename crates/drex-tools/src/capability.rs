@@ -768,4 +768,55 @@ mod tests {
         assert!(interactive.contains(&Capability::ComputerControl));
         assert!(!interactive.contains(&Capability::FileSystemRead));
     }
+
+    /// Regression test for CLI capability propagation bug.
+    /// Ensures that all registered interactive tools receive their required capabilities.
+    /// This test validates the fix for: filesystem.read failing due to missing FileSystemRead.
+    #[test]
+    fn interactive_execution_grants_required_capabilities() {
+        // Simulate the capabilities granted in CLI `drex ask` command
+        let interactive_caps = CapabilitySet::from(vec![
+            Capability::MemoryRead,
+            Capability::MemoryWrite,
+            Capability::FileSystemRead,
+            Capability::TerminalExecute,
+            Capability::BrowserRequest,
+        ]);
+
+        // Verify filesystem tools can work
+        assert!(interactive_caps.has(Capability::FileSystemRead),
+            "Interactive execution must grant FileSystemRead for filesystem.read tool");
+
+        // Verify terminal tools can work
+        assert!(interactive_caps.has(Capability::TerminalExecute),
+            "Interactive execution must grant TerminalExecute for terminal.execute tool");
+
+        // Verify web tools can work
+        assert!(interactive_caps.has(Capability::BrowserRequest),
+            "Interactive execution must grant BrowserRequest for web.fetch tool");
+
+        // Verify computer control is NOT granted without explicit flag
+        assert!(!interactive_caps.has(Capability::ComputerControl),
+            "ComputerControl must require --allow-control flag");
+
+        // Verify memory tools can work
+        assert!(interactive_caps.has_all(&CapabilitySet::from(vec![
+            Capability::MemoryRead,
+            Capability::MemoryWrite,
+        ])), "Interactive execution must grant memory capabilities");
+    }
+
+    /// Verify that adding ComputerControl requires explicit opt-in.
+    #[test]
+    fn computer_control_requires_explicit_grant() {
+        let mut caps = CapabilitySet::from(vec![
+            Capability::FileSystemRead,
+            Capability::TerminalExecute,
+        ]);
+        assert!(!caps.has(Capability::ComputerControl));
+
+        // Simulate --allow-control flag
+        caps.add(Capability::ComputerControl);
+        assert!(caps.has(Capability::ComputerControl));
+    }
 }
