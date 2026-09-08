@@ -292,7 +292,8 @@ pub async fn plan(
         prompt.push_str("1. The tool NAME is what comes before the ( - ONLY use: echo, filesystem.read, terminal.execute, git.status, git.diff, web.fetch, memory\n");
         prompt.push_str("2. 'retrieve' and 'store' are NOT tool names - they are VALUES for the 'action' parameter of the 'memory' tool\n");
         prompt.push_str("3. CORRECT: memory({\"action\": \"retrieve\", \"content\": \"query\"})\n");
-        prompt.push_str("4. WRONG: retrieve({\"query\": \"...\"}) - this tool does not exist!\n\n");
+        prompt.push_str("4. WRONG: retrieve({\"query\": \"...\"}) - this tool does not exist!\n");
+        prompt.push_str("5. For filesystem.read, use the EXACT filename with extension (e.g., README.md not README, Cargo.toml not just Cargo)\n\n");
 
         prompt.push_str(
             "If this is a simple question that can be answered directly without tools, provide the answer directly.\n\n",

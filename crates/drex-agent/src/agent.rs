@@ -649,7 +649,7 @@ impl Agent {
     /// Replan based on current state and failure reason.
     async fn replan(
         &self,
-        _current_plan: &Plan,
+        current_plan: &Plan,
         state: &ExecutionState,
         failure_reason: &str,
         _memory_store: &Option<Arc<dyn MemoryStore>>,
@@ -666,15 +666,33 @@ impl Agent {
             state.current_step, failure_reason
         );
 
+        // Include the original request for context
+        replan_request.push_str(&format!(
+            "\nOriginal task: {}\n",
+            current_plan.request
+        ));
+
         replan_request.push_str("Previous observations:\n");
         for obs in &state.observations {
+            let result_summary = if obs.success {
+                "succeeded".to_string()
+            } else {
+                format!("failed: {}", obs.error.as_deref().unwrap_or("unknown error"))
+            };
             replan_request.push_str(&format!(
-                "- Step {}: {} (success: {})\n",
-                obs.step_number, obs.tool_name, obs.success
+                "- Step {}: {} ({})",
+                obs.step_number, obs.tool_name, result_summary
             ));
+            // Include error details if available
+            if let Some(ref error) = obs.error {
+                replan_request.push_str(&format!(" - {}", error));
+            }
+            replan_request.push('\n');
         }
 
-        replan_request.push_str("\nPlease create a new plan to accomplish the original goal.");
+        replan_request.push_str("\nIMPORTANT: When using filesystem.read, make sure the file path includes the full extension (e.g., .md, .txt, .toml). ");
+        replan_request.push_str("List files first if unsure what files exist.\n\n");
+        replan_request.push_str("Create a new plan to accomplish the goal:");
 
         // Pass None to planner since it expects different type
         self.planner
@@ -780,15 +798,15 @@ impl Agent {
             match obs.tool_name.as_str() {
                 "filesystem.read" => {
                     // Extract file content from filesystem.read result
+                    // The ExecutionResult wraps tool output: {status, data: {content, resolved_path, size_bytes}}
                     if let Some(data) = obs.result.get("data") {
                         if let Some(content) = data.get("content").and_then(|c| c.as_str()) {
-                            // Get the file path being read
-                            let file_path = data.get("path")
+                            // Get the file path being read - try resolved_path first, then fall back
+                            let file_path = data.get("resolved_path")
                                 .and_then(|p| p.as_str())
                                 .map(|s| s.to_string())
                                 .or_else(|| {
-                                    // Extract path from result structure
-                                    obs.result.get("path")
+                                    data.get("path")
                                         .and_then(|p| p.as_str())
                                         .map(|s| s.to_string())
                                 })
@@ -821,11 +839,13 @@ impl Agent {
                                     file_path, line_count, char_count, preview, remaining_lines_str
                                 ));
                             }
-                        } else if let Some(error) = data.get("error").and_then(|e| e.as_str()) {
-                            response_parts.push(format!("I couldn't read the file: {}", error));
                         } else {
                             response_parts.push("The file was read successfully but no content was returned.".to_string());
                         }
+                    } else if let Some(error) = obs.result.get("error").and_then(|e| e.as_str()) {
+                        response_parts.push(format!("I couldn't read the file: {}", error));
+                    } else {
+                        response_parts.push("The file was read but no content data was available.".to_string());
                     }
                 }
                 "terminal.execute" => {
@@ -1025,14 +1045,17 @@ mod tests {
         let mut state = ExecutionState::new();
         
         // Add a filesystem.read observation with content
+        // The observation stores ExecutionResult which has: {status, data: {content, resolved_path, size_bytes}}
         state.add_observation(Observation {
             step_number: 1,
             tool_name: "filesystem.read".to_string(),
             success: true,
             result: serde_json::json!({
+                "status": "Success",
                 "data": {
                     "content": "This is the README content",
-                    "path": "README.md"
+                    "resolved_path": "/home/soumya/Desktop/DREX/README.md",
+                    "size_bytes": 27
                 }
             }),
             error: None,
@@ -1040,7 +1063,7 @@ mod tests {
 
         let plan = Plan::new("Read README.md");
         let response = agent.generate_final_response(&plan, &state).await.unwrap();
-        
+
         assert!(response.contains("README.md"), "Response should mention the file");
         assert!(response.contains("This is the README content"), "Response should include actual file content");
     }
@@ -1083,9 +1106,11 @@ mod tests {
             tool_name: "filesystem.read".to_string(),
             success: true,
             result: serde_json::json!({
+                "status": "Success",
                 "data": {
                     "content": "File contents here",
-                    "path": "file.txt"
+                    "resolved_path": "/home/soumya/Desktop/DREX/file.txt",
+                    "size_bytes": 18
                 }
             }),
             error: None,
@@ -1123,9 +1148,11 @@ mod tests {
             tool_name: "filesystem.read".to_string(),
             success: true,
             result: serde_json::json!({
+                "status": "Success",
                 "data": {
                     "content": large_content,
-                    "path": "large.txt"
+                    "resolved_path": "/home/soumya/Desktop/DREX/large.txt",
+                    "size_bytes": 3000
                 }
             }),
             error: None,
