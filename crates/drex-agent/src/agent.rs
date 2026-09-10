@@ -660,6 +660,34 @@ impl Agent {
             "Replanning..."
         );
 
+        // Check if this was a mathematical or conceptual question that was badly misclassified
+        // and try to recover directly by requesting only direct answers for such questions
+        let is_math_or_conceptual_request = current_plan.request.to_lowercase().contains("what is")
+            && (
+                current_plan.request.contains("*") || 
+                current_plan.request.contains("+") || 
+                current_plan.request.contains("-") || 
+                current_plan.request.contains("/") ||
+                current_plan.request.contains("explain") ||
+                current_plan.request.contains("define") ||
+                current_plan.request.contains("?")
+            );
+        
+        if is_math_or_conceptual_request && failure_reason.contains("terminal.execute") {
+            // This is a case of a math/concept question being misinterpreted 
+            // as needing tool execution - try to recover directly with a clear prompt
+            let direct_answer_prompt = format!(
+                "Your previous plan incorrectly attempted to solve '{}' with a terminal execution, \
+                which is not required for this type of question. Please provide the direct mathematical/conceptual \
+                answer to the question '{}'. No tool calls are needed.",
+                current_plan.request, current_plan.request
+            );
+            
+            return self.planner.plan(&direct_answer_prompt, None)
+                .await
+                .map_err(AgentError::from);
+        }
+
         // Build a replanning request that includes context from observations
         let mut replan_request = format!(
             "The previous plan failed at step {} with reason: {}. ",
@@ -778,9 +806,29 @@ impl Agent {
     /// Generate the final response to the user.
     async fn generate_final_response(
         &self,
-        _plan: &Plan,
+        plan: &Plan,
         state: &ExecutionState,
     ) -> Result<String, AgentError> {
+        // If the plan was a direct answer (no steps or tools needed),
+        // return just the direct answer content, not formatted response
+        if plan.is_direct_answer && plan.direct_answer.is_some() {
+            // Clean up the direct answer from any format artifacts 
+            let answer = plan.direct_answer.as_ref().unwrap();
+            let cleaned = answer.trim();
+            
+            // If it begins with "ANSWER:", strip that prefix 
+            let final_answer = if cleaned.to_lowercase().starts_with("answer:") {
+                let after_colon = cleaned.find(':')
+                    .map(|pos| cleaned[pos + 1..].trim())
+                    .unwrap_or(cleaned);
+                after_colon
+            } else {
+                cleaned
+            };
+            
+            return Ok(final_answer.to_string());
+        }
+
         // If we have observations, build a response from them
         if state.observations.is_empty() {
             return Ok("I've completed the requested task.".to_string());

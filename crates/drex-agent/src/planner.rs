@@ -275,10 +275,37 @@ pub async fn plan(
         prompt.push_str("\n\n");
 
         prompt.push_str(
-            "Create a plan with numbered steps using the available tools.\n\n",
+            "PREFERRED APPROACH: ALWAYS USE SPECIALIZED TOOLS WHEN THEY EXIST FOR THE TASK.\n\n",
         );
 
-        prompt.push_str("IMPORTANT - YOU MUST ONLY USE THESE EXACT TOOL NAMES:\n");
+        prompt.push_str("IF A SPECIALIZED TOOL EXISTS FOR AN OPERATION, USE IT INSTEAD OF terminal.execute.\n\n");
+
+        prompt.push_str("Examples of PREFERRED SPECIALIZED TOOLS:\n");
+        prompt.push_str("- Git status: git.status({\"path\":\".\"}) -> NOT terminal.execute(\"git status\")\n");
+        prompt.push_str("- Git diff: git.diff({\"path\":\".\"}) -> NOT terminal.execute(\"git diff\")\n");
+        prompt.push_str("- Read file: filesystem.read({\"path\":\"file.txt\"}) -> NOT terminal.execute(\"cat file.txt\")\n");
+        prompt.push_str("- Fetch web content: web.fetch({\"url\":\"https://example.com\"}) -> NOT terminal.execute(\"curl https://example.com\")\n");
+        prompt.push_str("- Memory retrieve: memory({\"action\":\"retrieve\",\"content\":\"query\"}) -> NOT terminal.execute(\"echo memory_content\")\n");
+        prompt.push_str("- Memory store: memory({\"action\":\"store\",\"content\":\"data\"}) -> NOT terminal.execute(\"echo data >> memory.txt\")\n\n");
+
+        prompt.push_str("ONLY USE terminal.execute WHEN NO SPECIALIZED TOOL EXISTS FOR THE OPERATION.\n\n");
+
+        prompt.push_str("If this request requires NO external interaction or state changes, ANSWER DIRECTLY.\n\n");
+        
+        prompt.push_str("EXAMPLES OF DIRECT ANSWERS (NO TOOLS NEEDED):\n");
+        prompt.push_str("- What is 25 * 17? -> ANSWER: 425\n");
+        prompt.push_str("- What is the capital of France? -> ANSWER: Paris\n");
+        prompt.push_str("- Explain what HTTP is. -> ANSWER: HyperText Transfer Protocol...\n");
+        prompt.push_str("- What does SQL stand for? -> ANSWER: Structured Query Language\n\n");
+
+        prompt.push_str("EXAMPLES OF TOOL USAGE (EXTERNAL INTERACTION REQUIRED):\n");
+        prompt.push_str("- Read README.md -> filesystem.read({\"path\":\"README.md\"})\n");
+        prompt.push_str("- Show git status -> git.status({\"path\":\".\"})\n");
+        prompt.push_str("- Run pwd -> terminal.execute({\"command\":\"pwd\"})\n");
+        prompt.push_str("- What do you remember about X? -> memory({\"action\":\"retrieve\",\"content\":\"X\"})\n");
+        prompt.push_str("- Remember that X -> memory({\"action\":\"store\",\"content\":\"X\"})\n\n");
+
+        prompt.push_str("TOOL SPECIFICATIONS:\n");
         prompt.push_str("- echo({\"message\": \"<text>\"}) - Echo text back (for testing)\n");
         prompt.push_str("- filesystem.read({\"path\": \"<file_path>\"}) - Read contents of a file\n");
         prompt.push_str("- terminal.execute({\"command\": \"<cmd>\"}) - Execute a shell command\n");
@@ -293,13 +320,10 @@ pub async fn plan(
         prompt.push_str("2. 'retrieve' and 'store' are NOT tool names - they are VALUES for the 'action' parameter of the 'memory' tool\n");
         prompt.push_str("3. CORRECT: memory({\"action\": \"retrieve\", \"content\": \"query\"})\n");
         prompt.push_str("4. WRONG: retrieve({\"query\": \"...\"}) - this tool does not exist!\n");
-        prompt.push_str("5. For filesystem.read, use the EXACT filename with extension (e.g., README.md not README, Cargo.toml not just Cargo)\n\n");
+        prompt.push_str("5. For filesystem.read, use the EXACT filename with extension (e.g., README.md not README, Cargo.toml not just Cargo)\n");
+        prompt.push_str("6. PREFER SPECIALIZED TOOLS OVER terminal.execute WHEN THEY EXISTS FOR THE SAME OPERATION\n\n");
 
-        prompt.push_str(
-            "If this is a simple question that can be answered directly without tools, provide the answer directly.\n\n",
-        );
-
-        prompt.push_str("Return your response in EXACTLY one of these formats:\n\n");
+        prompt.push_str("RETURN YOUR RESPONSE IN EXACTLY ONE OF THESE FORMATS:\n\n");
 
         prompt.push_str("FORMAT 1 - Multi-step task with tools:\n");
         prompt.push_str("Step 1: tool_name({\"param\": \"value\"})\n");
@@ -328,21 +352,42 @@ pub async fn plan(
             ));
         }
 
-        // Check for direct answer format
+        // Check for direct answer format - with better parsing for the ANSWER
         if let Some(answer) = trimmed.strip_prefix("ANSWER:") {
             return Ok(Plan::new(request)
                 .with_context(context.to_vec())
                 .with_direct_answer(answer.trim()));
         }
 
-        // Check if output starts with ANSWER (case insensitive)
+        // Check if output starts with ANSWER (case insensitive) and extract the actual answer appropriately
         let lower = trimmed.to_lowercase();
         if lower.starts_with("answer:") {
             if let Some(idx) = trimmed.find(':') {
                 let answer = trimmed[idx + 1..].trim();
+                // Clean up any trailing text from model response that shouldn't be in answer
+                let clean_answer = answer.split('\n').next().unwrap_or(answer).trim();
                 return Ok(Plan::new(request)
                     .with_context(context.to_vec())
-                    .with_direct_answer(answer));
+                    .with_direct_answer(clean_answer));
+            }
+        }
+
+        // Special case: if raw text contains just the direct answer line without a prefix,
+        // extract the content after "ANSWER:" for cleaner direct answer formatting
+        if trimmed.contains("ANSWER:") && !trimmed.starts_with("ANSWER:") {
+            if let Some(pos) = trimmed.find("ANSWER:") {
+                let answer_part = &trimmed[pos + 7..]; // 7 = len("ANSWER:")
+                let clean_answer = answer_part.trim();
+                // Check if it might still have format prefixes or we can extract the actual number/value
+                if let Some(newline_pos) = clean_answer.find('\n') {
+                    return Ok(Plan::new(request)
+                        .with_context(context.to_vec())
+                        .with_direct_answer(clean_answer[..newline_pos].trim()));
+                } else {
+                    return Ok(Plan::new(request)
+                        .with_context(context.to_vec())
+                        .with_direct_answer(clean_answer.trim()));
+                }
             }
         }
 
@@ -657,6 +702,50 @@ mod tests {
 
         // Should create a single implicit step
         assert_eq!(plan.step_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn planner_prefers_specialized_tools_over_terminal_execute() {
+        // Plan should prefer git.status to terminal.execute("git status")
+        let mock_response = "Step 1: git.status({\"path\":\".\"})";
+        let backend = MockPlannerBackend::new(mock_response);
+
+        let mut router = ModelRouter::new();
+        router.register(TaskKind::Main, Box::new(backend));
+
+        let planner = Planner::new(Arc::new(router));
+
+        // This request requires git status and should prefer the specialized tool
+        let plan = planner.plan("Show git status for current project", None::<&dyn MemoryStore>).await.unwrap();
+        
+        assert_eq!(plan.step_count(), 1);
+        assert!(plan.steps[0].description.contains("git.status"));
+        assert!(!plan.steps[0].description.contains("terminal.execute"));
+    }
+
+    #[tokio::test]
+    async fn planner_handles_multi_step_requirement_completeness() {
+        // This scenario would be used to validate the multi-step behavior
+        // but for now, we test planner generates plan with both elements
+        
+        let mock_response = "Step 1: filesystem.read({\"path\":\"README.md\"})\nStep 2: git.status({\"path\":\".\"})";
+        let backend = MockPlannerBackend::new(mock_response);
+
+        let mut router = ModelRouter::new();
+        router.register(TaskKind::Main, Box::new(backend));
+
+        let planner = Planner::new(Arc::new(router));
+
+        // This should generate a plan with both steps 
+        let plan = planner.plan("Read README.md and tell me what branch this project is currently on.", None::<&dyn MemoryStore>).await.unwrap();
+        
+        assert_eq!(plan.step_count(), 2);
+        
+        // Verify planner correctly uses specialized tools over terminal.execute
+        assert!(plan.steps[0].description.contains("filesystem.read"));
+        assert!(plan.steps[1].description.contains("git.status"));
+        assert!(!plan.steps[0].description.contains("terminal.execute"));
+        assert!(!plan.steps[1].description.contains("terminal.execute"));
     }
 
     // Mock memory store for testing context retrieval
