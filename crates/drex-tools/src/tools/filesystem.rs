@@ -157,6 +157,13 @@ impl FileSystemReadTool {
     /// - The path contains traversal components (..)
     /// - The resolved path is outside the allowed root
     pub fn validate_path(&self, input_path: &str) -> Result<PathBuf, FileSystemError> {
+        // Reject paths starting with "/" or which might have absolute path components
+        if input_path.starts_with('/') {
+            return Err(FileSystemError::NotAbsolutePath {
+                path: input_path.to_string(),
+            });
+        }
+
         // Reject paths with traversal components
         if input_path.contains("..") {
             return Err(FileSystemError::PathContainsTraversal {
@@ -174,7 +181,10 @@ impl FileSystemReadTool {
                     });
                 }
                 Component::RootDir | Component::Prefix(_) => {
-                    // Absolute paths or paths with prefixes are handled below
+                    // Absolute paths or paths with prefixes are not allowed
+                    return Err(FileSystemError::NotAbsolutePath {
+                        path: input_path.to_string(),
+                    });
                 }
                 Component::Normal(_) | Component::CurDir => {
                     // These are fine
@@ -184,6 +194,14 @@ impl FileSystemReadTool {
 
         // Join with allowed root
         let resolved = self.config.allowed_root.join(path);
+
+        // Apply path length check to prevent DOS
+        let resolved_str = resolved.to_string_lossy();
+        if resolved_str.len() > 4096 {  // Arbitrarily selected limit to prevent path traversal attacks
+            return Err(FileSystemError::PathContainsTraversal {
+                path: input_path.to_string(),
+            });
+        }
 
         // Canonicalize to resolve any symlinks and get absolute path
         // This also validates the file exists
@@ -197,6 +215,7 @@ impl FileSystemReadTool {
                     path: input_path.to_string(),
                 }
             } else {
+                // For any other IO error, treat as file not found for security
                 FileSystemError::FileNotFound {
                     path: input_path.to_string(),
                 }
@@ -216,6 +235,14 @@ impl FileSystemReadTool {
             return Err(FileSystemError::PathOutsideAllowedRoot {
                 path: input_path.to_string(),
                 root: canonical_root.to_string_lossy().to_string(),
+            });
+        }
+
+        // Additional safety checks to prevent unexpected path resolution issues
+        if !canonical.starts_with(&self.config.allowed_root.canonicalize().unwrap_or(self.config.allowed_root.clone())) {
+            return Err(FileSystemError::PathOutsideAllowedRoot {
+                path: input_path.to_string(),
+                root: self.config.allowed_root.to_string_lossy().to_string(),
             });
         }
 

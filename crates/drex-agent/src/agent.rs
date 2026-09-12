@@ -448,7 +448,13 @@ impl Agent {
                     match self.executor.execute(&tool_call, &context).await {
                         Ok(result) => {
                             let success = result.is_success();
-                            let result_json = serde_json::to_value(&result).unwrap_or_default();
+                            let result_json = serde_json::to_value(&result)
+                                .map_err(|e| {
+                                    AgentError::Unexpected(format!(
+                                        "Failed to serialize tool result for observation: {}, cause: {}",
+                                        tool_call.tool_name, e
+                                    ))
+                                })?;
                             let observation = Observation {
                                 step_number: step.number,
                                 tool_name: tool_call.tool_name.clone(),
@@ -933,7 +939,7 @@ impl Agent {
                     if let Some(data) = obs.result.get("data") {
                         if let Some(text) = data.get("text").and_then(|t| t.as_str()) {
                             let preview = if text.len() > 2000 {
-                                format!("{}\n\n[Content truncated, {} total characters]", 
+                                format!("{}\n\n[Content truncated, {} total characters]",
                                     &text[..2000], text.len())
                             } else {
                                 text.to_string()

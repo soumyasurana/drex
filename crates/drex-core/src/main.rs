@@ -193,12 +193,20 @@ async fn run_ask(request: String, _trace: bool, dry_run: bool, _allow_control: b
     let mut tool_registry = drex_tools::ToolRegistry::new();
     let current_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/tmp"));
 
+    // Limit directory path for security (prevent path traversal issues)
+    let sanitized_current_dir = if current_dir.to_string_lossy().len() > 1000 {
+        // Use a safe fallback if the path is suspiciously long
+        std::path::PathBuf::from("/tmp")
+    } else {
+        current_dir
+    };
+
     // Register harmless tools (no capabilities required)
     tool_registry.register(Box::new(drex_tools::tools::EchoTool::new()))
         .map_err(|e| eprintln!("Warning: Failed to register echo tool: {}", e)).ok();
 
     // Register filesystem tool with config restricting to current directory
-    let fs_config = drex_tools::tools::FileSystemConfig::new(&current_dir);
+    let fs_config = drex_tools::tools::FileSystemConfig::new(&sanitized_current_dir);
     tool_registry.register(Box::new(drex_tools::tools::FileSystemReadTool::new(fs_config)))
         .map_err(|e| eprintln!("Warning: Failed to register filesystem tool: {}", e)).ok();
 
@@ -208,7 +216,7 @@ async fn run_ask(request: String, _trace: bool, dry_run: bool, _allow_control: b
         .map_err(|e| eprintln!("Warning: Failed to register terminal tool: {}", e)).ok();
 
     // Register git tools with config
-    let git_config = drex_tools::tools::GitConfig::new(&current_dir);
+    let git_config = drex_tools::tools::GitConfig::new(&sanitized_current_dir);
     tool_registry.register(Box::new(drex_tools::tools::GitStatusTool::new(git_config.clone())))
         .map_err(|e| eprintln!("Warning: Failed to register git_status tool: {}", e)).ok();
     tool_registry.register(Box::new(drex_tools::tools::GitDiffTool::new(git_config)))
